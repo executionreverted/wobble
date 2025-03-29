@@ -44,3 +44,10 @@ pass.on('update', async (e) => {
     }
   }
 })
+
+
+function createNewSeedPhrase(size = 20) {
+  const entropy = ethers.randomBytes(32)
+  const phrase = ethers.Mnemonic.fromEntropy(entropy).phrase
+  setTemporarySeedPhrase(phrase.split(' '))
+}
