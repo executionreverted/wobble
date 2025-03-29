@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 import RPC from 'bare-rpc';
 // @ts-ignore
 import bundle from '../app.bundle';
-
+import b4a from "b4a"
 export interface WorkletContextType {
   worklet: Worklet | null;
   isInitialized: boolean;
@@ -30,28 +30,28 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
   useEffect(() => {
     const initWorklet = async () => {
       try {
-        console.log('Init worklet')
+        console.log('Init worklet');
         setIsLoading(true);
         const newWorklet = new Worklet();
         newWorklet.start('/app.bundle', bundle, [Platform.OS]);
 
         // Initialize RPC client
         const { IPC } = newWorklet;
-        const client = new RPC(IPC, (req) => {
-          // Handle incoming RPC requests
-          if (req.command == 'getNewSeed') {
-            console.log(req)
-            console.log(req.data.value)
-            try {
-              const value = JSON.parse(req.data)
-              return value
+        const client = new RPC(
+          IPC,
+          (req: any) => {
+            if (req.command === 'seedGenerated') {
+              try {
+                const data = b4a.toString(req.data)
+                const parsedData = JSON.parse(data)
+                console.log(parsedData)
+              }
+              catch (e) {
+                console.error(e)
+              }
             }
-            catch (e) {
-              console.log(e)
-            }
-            return []
           }
-        });
+        );
 
         setWorklet(newWorklet);
         setRpcClient(client);
@@ -77,15 +77,12 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
 
   const generateSeedPhrase = useCallback(async (): Promise<string[]> => {
     if (!rpcClient) {
-      console.error('NO RPC')
-      return []
+      console.error('NO RPC');
+      return [];
     }
-
     try {
-      const request = rpcClient.request('getNewSeed');
-      const response = await request.send();
-      console.log({ response })
-      return response as string[] || [];
+      const request = rpcClient.request('generateSeed');
+      await request.send();
     } catch (err) {
       console.error('Failed to generate seed phrase:', err);
       throw err instanceof Error ? err : new Error('Failed to generate seed phrase');
@@ -106,5 +103,3 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     </WorkletContext.Provider>
   );
 };
-
-
