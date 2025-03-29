@@ -101,3 +101,6 @@ export const filterRooms = (rooms: Room[], searchTerm: string): Room[] => {
 export const getUserStatusText = (user: User): string => {
   return user.isOnline ? 'Online' : 'Offline';
 };
+
+
+export default {}

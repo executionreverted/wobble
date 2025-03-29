@@ -37,3 +37,5 @@ export type ChatContextType = {
   leaveRoom: () => void;
   sendMessage: (text: string) => Promise<void>;
 };
+
+export default {}

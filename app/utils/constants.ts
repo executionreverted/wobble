@@ -93,3 +93,6 @@ export const MOCK_MESSAGES = [
     timestamp: Date.now() - 900000
   },
 ];
+
+
+export default {}

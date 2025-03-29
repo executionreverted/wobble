@@ -1,0 +1,58 @@
+{
+  "version": 0,
+  "offset": 0,
+  "schema": [
+    {
+      "name": "writer",
+      "namespace": "roombase",
+      "id": 0,
+      "type": 1,
+      "indexes": [],
+      "schema": "@roombase/writer",
+      "derived": false,
+      "key": [
+        "key"
+      ],
+      "trigger": null
+    },
+    {
+      "name": "invite",
+      "namespace": "roombase",
+      "id": 1,
+      "type": 1,
+      "indexes": [],
+      "schema": "@roombase/invite",
+      "derived": false,
+      "key": [
+        "id"
+      ],
+      "trigger": null
+    },
+    {
+      "name": "metadata",
+      "namespace": "roombase",
+      "id": 2,
+      "type": 1,
+      "indexes": [],
+      "schema": "@roombase/metadata",
+      "derived": false,
+      "key": [
+        "id"
+      ],
+      "trigger": null
+    },
+    {
+      "name": "messages",
+      "namespace": "roombase",
+      "id": 3,
+      "type": 1,
+      "indexes": [],
+      "schema": "@roombase/messages",
+      "derived": false,
+      "key": [
+        "id"
+      ],
+      "trigger": null
+    }
+  ]
+}

@@ -1,3 +1,6 @@
+import './utils/gesture-handler.native.js';
+
+
 import React from 'react';
 import { registerRootComponent } from 'expo';
 import { SafeAreaProvider } from 'react-native-safe-area-context';

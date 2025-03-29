@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "schema": [
+    {
+      "id": 0,
+      "name": "@roombase/remove-writer",
+      "requestType": "@roombase/writer",
+      "version": 1
+    },
+    {
+      "id": 1,
+      "name": "@roombase/add-writer",
+      "requestType": "@roombase/writer",
+      "version": 1
+    },
+    {
+      "id": 2,
+      "name": "@roombase/add-invite",
+      "requestType": "@roombase/invite",
+      "version": 1
+    },
+    {
+      "id": 3,
+      "name": "@roombase/send-message",
+      "requestType": "@roombase/messages",
+      "version": 1
+    },
+    {
+      "id": 4,
+      "name": "@roombase/delete-message",
+      "requestType": "@roombase/messages",
+      "version": 1
+    },
+    {
+      "id": 5,
+      "name": "@roombase/set-metadata",
+      "requestType": "@roombase/metadata",
+      "version": 1
+    }
+  ]
+}
