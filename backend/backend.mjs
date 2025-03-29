@@ -15,12 +15,8 @@ const path =
 
 
 const genSeed = () => {
-  const words = []
-  for (let i = 0; i < 20; i++) {
-    const mnem = bip39.generateMnemonic()
-    words.push(mnem?.[0] || mnem)
-  }
-  return words
+  const mnem = bip39.generateMnemonic()
+  return mnem.split(' ')
 }
 
 const sendSeed = () => {

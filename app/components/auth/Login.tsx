@@ -6,14 +6,15 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../hooks/useAuth';
 import { COLORS } from '../../utils/constants';
 import useWorklet from '@/app/hooks/useWorklet';
+import useUser from '@/app/hooks/useUser';
 
 const SeedPhraseLogin = () => {
-  const [seedPhrase, setSeedPhrase] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const navigation = useNavigation();
   const { login } = useAuth();
   const insets = useSafeAreaInsets();
   const { generateSeedPhrase } = useWorklet()
+  const { seedPhrase } = useUser()
 
   useEffect(() => {
     generatePhrase();
@@ -24,9 +25,7 @@ const SeedPhraseLogin = () => {
     try {
       // In a real implementation, we would call the backend via IPC RPC
       // For demo purposes, we'll generate a mock seed phrase
-      const phrase = await generateSeedPhrase()
-      console.log(phrase)
-      setSeedPhrase(phrase);
+      await generateSeedPhrase()
     } catch (error) {
       console.error('Error generating seed phrase:', error);
       Alert.alert('Error', 'Failed to generate seed phrase. Please try again.');

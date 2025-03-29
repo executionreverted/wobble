@@ -8,18 +8,24 @@ import { AuthProvider } from './contexts/AuthContext';
 import { ChatProvider } from './contexts/ChatContext';
 import AppNavigator from './App';
 import { WorkletProvider } from './contexts/WorkletContext';
+import { UserProvider } from './contexts/UserContext';
+
 
 const App = () => {
   return (
     <SafeAreaProvider>
       <StatusBar style="light" />
-      <WorkletProvider>
-        <AuthProvider>
-          <ChatProvider>
-            <AppNavigator />
-          </ChatProvider>
-        </AuthProvider>
-      </WorkletProvider>
+
+      <UserProvider>
+        <WorkletProvider>
+          <AuthProvider>
+            <ChatProvider>
+              <AppNavigator />
+            </ChatProvider>
+          </AuthProvider>
+        </WorkletProvider>
+      </UserProvider>
+
     </SafeAreaProvider>
   );
 };

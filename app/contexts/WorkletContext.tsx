@@ -5,6 +5,7 @@ import RPC from 'bare-rpc';
 // @ts-ignore
 import bundle from '../app.bundle';
 import b4a from "b4a"
+import useUser from '../hooks/useUser';
 export interface WorkletContextType {
   worklet: Worklet | null;
   isInitialized: boolean;
@@ -20,6 +21,7 @@ export interface WorkletProviderProps {
 }
 
 export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) => {
+  const { storeSeedPhrase } = useUser()
   const [worklet, setWorklet] = useState<Worklet | null>(null);
   const [rpcClient, setRpcClient] = useState<any>(null);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -45,6 +47,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
                 const data = b4a.toString(req.data)
                 const parsedData = JSON.parse(data)
                 console.log(parsedData)
+                storeSeedPhrase(parsedData)
               }
               catch (e) {
                 console.error(e)
@@ -75,7 +78,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     };
   }, []);
 
-  const generateSeedPhrase = useCallback(async (): Promise<string[]> => {
+  const generateSeedPhrase = useCallback(async (): Promise<any> => {
     if (!rpcClient) {
       console.error('NO RPC');
       return [];
