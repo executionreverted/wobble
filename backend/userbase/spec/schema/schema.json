@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "schema": [
+    {
+      "name": "writer",
+      "namespace": "userbase",
+      "compact": false,
+      "flagsPosition": -1,
+      "fields": [
+        {
+          "name": "key",
+          "required": true,
+          "type": "buffer",
+          "version": 1
+        }
+      ]
+    },
+    {
+      "name": "invite",
+      "namespace": "userbase",
+      "compact": false,
+      "flagsPosition": -1,
+      "fields": [
+        {
+          "name": "id",
+          "required": true,
+          "type": "buffer",
+          "version": 1
+        },
+        {
+          "name": "invite",
+          "required": true,
+          "type": "buffer",
+          "version": 1
+        },
+        {
+          "name": "publicKey",
+          "required": true,
+          "type": "buffer",
+          "version": 1
+        },
+        {
+          "name": "expires",
+          "required": true,
+          "type": "int",
+          "version": 1
+        }
+      ]
+    },
+    {
+      "name": "metadata",
+      "namespace": "userbase",
+      "compact": false,
+      "flagsPosition": 4,
+      "fields": [
+        {
+          "name": "id",
+          "required": true,
+          "type": "string",
+          "version": 1
+        },
+        {
+          "name": "name",
+          "required": true,
+          "type": "string",
+          "version": 1
+        },
+        {
+          "name": "status",
+          "required": true,
+          "type": "string",
+          "version": 1
+        },
+        {
+          "name": "seed",
+          "required": true,
+          "type": "string",
+          "version": 1
+        },
+        {
+          "name": "contacts",
+          "required": false,
+          "type": "string",
+          "version": 1
+        },
+        {
+          "name": "rooms",
+          "required": false,
+          "type": "string",
+          "version": 1
+        }
+      ]
+    }
+  ]
+}

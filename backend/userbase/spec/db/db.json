@@ -1,0 +1,45 @@
+{
+  "version": 0,
+  "offset": 0,
+  "schema": [
+    {
+      "name": "writer",
+      "namespace": "userbase",
+      "id": 0,
+      "type": 1,
+      "indexes": [],
+      "schema": "@userbase/writer",
+      "derived": false,
+      "key": [
+        "key"
+      ],
+      "trigger": null
+    },
+    {
+      "name": "invite",
+      "namespace": "userbase",
+      "id": 1,
+      "type": 1,
+      "indexes": [],
+      "schema": "@userbase/invite",
+      "derived": false,
+      "key": [
+        "id"
+      ],
+      "trigger": null
+    },
+    {
+      "name": "metadata",
+      "namespace": "userbase",
+      "id": 2,
+      "type": 1,
+      "indexes": [],
+      "schema": "@userbase/metadata",
+      "derived": false,
+      "key": [
+        "id"
+      ],
+      "trigger": null
+    }
+  ]
+}

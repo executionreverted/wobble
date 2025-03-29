@@ -9,13 +9,14 @@ import z32 from 'z32';
 import b4a from 'b4a';
 import { Router, dispatch } from './spec/hyperdispatch/index.js';
 import db from './spec/db/index.js';
-import crypto from 'crypto';
+import crypto from 'bare-crypto';
 import { getEncoding } from './spec/hyperdispatch/messages.js';
-import fs, { writeFileSync } from 'fs';
+import fs, { writeFileSync } from 'bare-fs';
 import path from 'path';
-
-import { sanitizeTextForTerminal } from '../components/FileExplorer/utils.js';
+import { sanitizeTextForTerminal } from './.utils.mjs';
 import Hypercore from 'hypercore';
+
+
 class RoomBasePairer extends ReadyResource {
   constructor(store, invite, opts = {}) {
     super();

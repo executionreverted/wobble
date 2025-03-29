@@ -2,7 +2,6 @@
 
 import RPC from 'bare-rpc'
 import fs from 'bare-fs'
-import Autopass from 'autopass'
 import Corestore from 'corestore'
 import bip39 from "bip39"
 import b4a from "b4a"
@@ -41,3 +40,6 @@ if (fs.existsSync(path)) {
 }
 
 fs.mkdirSync(path)
+
+
+

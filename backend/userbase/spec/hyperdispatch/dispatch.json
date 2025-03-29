@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "schema": [
+    {
+      "id": 0,
+      "name": "@userbase/remove-writer",
+      "requestType": "@userbase/writer",
+      "version": 1
+    },
+    {
+      "id": 1,
+      "name": "@userbase/add-writer",
+      "requestType": "@userbase/writer",
+      "version": 1
+    },
+    {
+      "id": 2,
+      "name": "@userbase/add-invite",
+      "requestType": "@userbase/invite",
+      "version": 1
+    },
+    {
+      "id": 3,
+      "name": "@userbase/set-metadata",
+      "requestType": "@userbase/metadata",
+      "version": 1
+    }
+  ]
+}
