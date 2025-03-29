@@ -82,3 +82,5 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     </ChatContext.Provider>
   );
 };
+
+export default ChatProvider

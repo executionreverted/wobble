@@ -32,3 +32,5 @@ export const useWorklet = () => {
     teardown
   };
 };
+
+export default useWorklet

@@ -28,3 +28,11 @@ export const logout = async (): Promise<void> => {
   // Mock successful logout
   return;
 };
+
+
+export default {
+  getCurrentUser,
+  login,
+  register,
+  logout
+}

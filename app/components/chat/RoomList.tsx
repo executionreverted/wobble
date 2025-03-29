@@ -4,9 +4,11 @@ import {
   Text,
   FlatList,
   TouchableOpacity,
-  StyleSheet
+  StyleSheet,
+  SafeAreaView
 } from 'react-native';
 import { Room } from '../../types';
+import { Ionicons } from '@expo/vector-icons';
 
 interface RoomListProps {
   rooms: Room[];
@@ -16,8 +18,13 @@ interface RoomListProps {
 
 const RoomList: React.FC<RoomListProps> = ({ rooms, onSelectRoom, currentRoomId }) => {
   return (
-    <View style={styles.container}>
-      <Text style={styles.header}>Channels</Text>
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Chat App</Text>
+      </View>
+
+      <Text style={styles.sectionHeader}>Channels</Text>
+
       <FlatList
         data={rooms}
         keyExtractor={(item) => item.id}
@@ -29,36 +36,59 @@ const RoomList: React.FC<RoomListProps> = ({ rooms, onSelectRoom, currentRoomId 
             ]}
             onPress={() => onSelectRoom(item)}
           >
+            <Ionicons
+              name="chatbubble-outline"
+              size={18}
+              color={currentRoomId === item.id ? "#fff" : "#8e9297"}
+              style={styles.roomIcon}
+            />
             <Text
               style={[
                 styles.roomName,
                 currentRoomId === item.id ? styles.activeRoomText : null
               ]}
             >
-              # {item.name}
+              {item.name}
             </Text>
           </TouchableOpacity>
         )}
+        style={styles.list}
       />
-    </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
     backgroundColor: '#2f3136',
-    width: '100%',
-    maxWidth: 240,
   },
   header: {
-    fontSize: 16,
+    paddingTop: 20,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#202225',
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  sectionHeader: {
+    fontSize: 14,
     color: '#8e9297',
     padding: 16,
     paddingBottom: 8,
     fontWeight: 'bold',
     textTransform: 'uppercase',
   },
+  list: {
+    flex: 1,
+  },
   roomItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
     padding: 10,
     paddingLeft: 16,
     paddingRight: 16,
@@ -66,6 +96,9 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     marginRight: 8,
     marginBottom: 2,
+  },
+  roomIcon: {
+    marginRight: 8,
   },
   activeRoom: {
     backgroundColor: '#393c43',

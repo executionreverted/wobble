@@ -15,3 +15,6 @@ export { default as UserList } from './chat/UserList';
 export { default as Button } from './common/Button';
 export { default as Header } from './common/Header';
 export { default as StatusIndicator } from './common/StatusIndicator';
+export { default as SwipeableDrawerLayout } from './common/SwipeableDrawerLayout';
+
+

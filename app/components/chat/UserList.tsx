@@ -3,7 +3,8 @@ import {
   View,
   Text,
   FlatList,
-  StyleSheet
+  StyleSheet,
+  SafeAreaView
 } from 'react-native';
 import { User } from '../../types';
 import StatusIndicator from '../common/StatusIndicator';
@@ -21,11 +22,19 @@ const UserList: React.FC<UserListProps> = ({ users, currentUserId }) => {
     return a.username.localeCompare(b.username);
   });
 
+  // Count online users
+  const onlineCount = users.filter(user => user.isOnline).length;
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.header}>
-        Online - {users.filter(user => user.isOnline).length}
+    <SafeAreaView style={styles.container}>
+      <View style={styles.headerContainer}>
+        <Text style={styles.headerTitle}>Members</Text>
+      </View>
+
+      <Text style={styles.sectionHeader}>
+        Online - {onlineCount}
       </Text>
+
       <FlatList
         data={sortedUsers}
         keyExtractor={(item) => item.id}
@@ -43,18 +52,30 @@ const UserList: React.FC<UserListProps> = ({ users, currentUserId }) => {
             </Text>
           </View>
         )}
+        style={styles.list}
       />
-    </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
     backgroundColor: '#2f3136',
-    minWidth: 200,
-    maxWidth: 240,
   },
-  header: {
+  headerContainer: {
+    paddingTop: 20,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#202225',
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  sectionHeader: {
     fontSize: 14,
     color: '#8e9297',
     padding: 16,
@@ -62,10 +83,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     textTransform: 'uppercase',
   },
+  list: {
+    flex: 1,
+  },
   userItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: 10,
     paddingHorizontal: 16,
   },
   username: {

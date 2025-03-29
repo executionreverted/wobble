@@ -4,7 +4,6 @@ import { Room as RoomType, Message, User } from '../../types';
 import RoomHeader from './RoomHeader';
 import MessageList from './MessageList';
 import MessageInput from './MessageInput';
-import UserList from './UserList';
 
 interface RoomProps {
   room: RoomType;
@@ -32,10 +31,6 @@ const Room: React.FC<RoomProps> = ({
           <MessageList messages={messages} currentUserId={currentUserId} />
           <MessageInput onSendMessage={onSendMessage} />
         </View>
-
-        <View style={styles.sidePanel}>
-          <UserList users={onlineUsers} currentUserId={currentUserId} />
-        </View>
       </View>
     </View>
   );
@@ -53,11 +48,6 @@ const styles = StyleSheet.create({
   chatArea: {
     flex: 1,
     flexDirection: 'column',
-  },
-  sidePanel: {
-    width: 240,
-    borderLeftWidth: 1,
-    borderLeftColor: '#2f3136',
   },
 });
 

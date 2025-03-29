@@ -46,3 +46,11 @@ export const getRoomHistory = async (roomId: string): Promise<Message[]> => {
   // Filter messages for this room
   return MOCK_MESSAGES.filter(msg => msg.roomId === roomId);
 };
+
+export default {
+  getRooms,
+  joinRoom,
+  leaveRoom,
+  sendMessage,
+  getRoomHistory
+}
