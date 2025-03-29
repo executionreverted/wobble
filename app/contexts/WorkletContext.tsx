@@ -38,6 +38,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
         const newWorklet = new Worklet();
         newWorklet.start('/app.bundle', bundle, [Platform.OS]);
 
+
         // Initialize RPC client
         const { IPC } = newWorklet;
         const client = new RPC(
@@ -82,6 +83,10 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     // Clean up on unmount
     return () => {
       if (worklet) {
+        if (rpcClient) {
+          const req = rpcClient.request('teardown')
+          req.send("")
+        }
         worklet.terminate();
       }
     };

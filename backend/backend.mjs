@@ -11,16 +11,24 @@ const path =
   Bare.argv[0] === 'android'
     ? '/data/data/to.holepunch.bare.expo/autopass-example'
     : './tmp/autopass-example/'
-
 const userBasePath = path + 'userbase/'
 const roomBasePath = path + 'roombase/'
 
+
+let userCorestore;
 let userBase;
-let roomBases;
+let roomBases = {};
+let roomCorestores = {}
+
 
 const genSeed = () => {
-  const mnem = bip39.generateMnemonic()
-  return mnem.split(' ')
+  const words = []
+  for (let i = 0; i < 20; i++) {
+    const mnem = bip39.generateMnemonic()
+    const word = mnem.split(' ')?.[0]
+    words.push(word)
+  }
+  return words
 }
 
 const sendSeed = () => {
@@ -31,6 +39,10 @@ const sendSeed = () => {
 
 const rpc = new RPC(IPC, (req, error) => {
   console.log('Received RPC request:', req.command)
+
+  if (req.command === 'teardown') {
+    teardown()
+  }
 
   if (req.command === 'generateSeed') {
     sendSeed()
@@ -54,7 +66,9 @@ if (fs.existsSync(path)) {
 }
 
 const createNewAccount = async (seed) => {
-
+  if (userCorestore) {
+    await userCorestore?.close?.()
+  }
   if (userBase) return { exists: true }
 
   if (hasAccount()) {
@@ -72,8 +86,8 @@ const createNewAccount = async (seed) => {
     }
 
     // Initialize corestore
-    const store = new Corestore(userBasePath)
-    await store.ready()
+    userCorestore = new Corestore(userBasePath)
+    await userCorestore.ready()
 
     // Create userbase
     userBase = new UserBase(store, { userSeed: seed })
@@ -96,4 +110,11 @@ const createNewAccount = async (seed) => {
 
 const hasAccount = () => {
   return fs.existsSync(userBasePath)
+}
+
+
+const teardown = () => {
+  userBase?.close?.()
+  userCorestore?.close()
+  Object.entries().forEach((v) => v?.close?.())
 }
