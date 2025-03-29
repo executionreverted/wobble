@@ -9,7 +9,7 @@ import z32 from 'z32';
 import b4a from 'b4a';
 import { Router, dispatch } from './spec/hyperdispatch/index.mjs';
 import db from './spec/db/index.mjs';
-
+import crypto from "bare-crypto"
 
 class UserBasePairer extends ReadyResource {
   constructor(store, invite, opts = {}) {
@@ -211,34 +211,89 @@ class UserBase extends ReadyResource {
   }
 
   async _initializeUser() {
-    const existingUser = await this.getUserInfo();
-    if (!existingUser) {
-      // Store basic room info
+    try {
+      // Generate a deterministic public key from the seed phrase
+      let pubKey;
 
-      const newUser = {
-        id: this.userPubKey,
-        seed: this.userSeed,
-        name: "User-" + Math.ceil(Math.random() * 10000),
-        status: "Available",
-        contacts: JSON.stringify([]),
-        rooms: JSON.stringify([])
+      if (Array.isArray(this.userSeed)) {
+        // If seed is an array of words, join them
+        this.userSeed = this.userSeed.join(' ');
       }
 
-      try {
-        const dispatchData = dispatch('@userbase/set-metadata', newUser);
-        await this.base.append(dispatchData);
-      } catch (e) {
+      // Generate pubKey from seed using crypto
+      const seedBuffer = b4a.from(this.userSeed);
+      const hash = crypto.createHash('sha256').update(seedBuffer).digest();
+      pubKey = b4a.toString(hash, 'hex');
 
+      // Set as the user's public key
+      this.userPubKey = pubKey;
+
+      // Check if user already exists
+      const existingUser = await this.getUserInfo();
+
+      if (!existingUser) {
+        // Create new user record
+        const newUser = {
+          id: this.userPubKey,
+          seed: this.userSeed,
+          name: "User-" + Math.ceil(Math.random() * 10000),
+          status: "Available",
+          contacts: JSON.stringify([]),
+          rooms: JSON.stringify([])
+        };
+
+        try {
+          const dispatchData = dispatch('@userbase/set-metadata', newUser);
+          await this.base.append(dispatchData);
+
+          // Update local properties
+          this.userName = newUser.name;
+          this.userStatus = newUser.status;
+          this.userRooms = [];
+          this.userContacts = [];
+
+          console.log('Created new user profile:', this.userPubKey);
+        } catch (e) {
+          console.error('Error creating user profile:', e);
+        }
+      } else {
+        // Update local properties from stored values
+        this.userPubKey = existingUser.id;
+        this.userSeed = existingUser.seed;
+        this.userName = existingUser.name;
+        this.userStatus = existingUser.status;
+
+        try {
+          this.userRooms = existingUser.rooms ? JSON.parse(existingUser.rooms) : [];
+          this.userContacts = existingUser.contacts ? JSON.parse(existingUser.contacts) : [];
+        } catch (e) {
+          console.error('Error parsing user data:', e);
+          this.userRooms = [];
+          this.userContacts = [];
+        }
+
+        console.log('Loaded existing user profile:', this.userPubKey);
       }
-    } else {
-      // Update local properties from stored values
-      this.userPubKey = existingUser.id;
-      this.userSeed = existingUser.seed;
-      this.userName = existingUser.name
-      this.userStatus = existingUser.status;
-      this.userRooms = JSON.parse(existingUser.rooms) || []
-      this.userContacts = JSON.parse(existingUser.contacts) || []
+
+      return true;
+    } catch (error) {
+      console.error('Error in _initializeUser:', error);
+      return false;
     }
+  }
+
+  // Method to get user data in a structured format
+  async getUserData() {
+    await this.ready();
+
+    return {
+      id: this.userPubKey,
+      name: this.userName,
+      status: this.userStatus,
+      seed: this.userSeed,
+      contacts: this.userContacts,
+      rooms: this.userRooms
+    };
   }
 
   get writerKey() {

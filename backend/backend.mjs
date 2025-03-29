@@ -54,6 +54,9 @@ if (fs.existsSync(path)) {
 }
 
 const createNewAccount = async (seed) => {
+
+  if (userBase) return { exists: true }
+
   if (hasAccount()) {
     return { exists: true }
   }

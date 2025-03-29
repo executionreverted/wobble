@@ -14,6 +14,16 @@ const SeedPhraseLogin = () => {
   const insets = useSafeAreaInsets();
   const { generateSeedPhrase, confirmSeedPhrase } = useWorklet()
   const { seedPhrase } = useUser()
+  const [navigated, setNavigated] = useState(false)
+
+
+  useEffect(() => {
+    if (!navigated && user) {
+      setNavigated(true)
+      navigation.navigate('MainTabs');
+    }
+  }, [user])
+
 
   useEffect(() => {
     generatePhrase();
@@ -45,14 +55,15 @@ const SeedPhraseLogin = () => {
       if (!seedPhrase || seedPhrase.length == 0) {
         throw new Error("Invalid seed")
       }
-      await confirmSeedPhrase()
+      await confirmSeedPhrase(seedPhrase)
       // @ts-ignore
-      navigation.navigate('MainTabs');
     } catch (error) {
       console.error('Login error:', error);
       Alert.alert('Error', 'Failed to log in. Please try again.');
     }
   };
+
+
 
   return (
     <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
