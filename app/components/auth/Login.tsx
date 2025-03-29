@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../hooks/useAuth';
 import { COLORS } from '../../utils/constants';
+import useWorklet from '@/app/hooks/useWorklet';
 
 const SeedPhraseLogin = () => {
   const [seedPhrase, setSeedPhrase] = useState<string[]>([]);
@@ -12,33 +13,31 @@ const SeedPhraseLogin = () => {
   const navigation = useNavigation();
   const { login } = useAuth();
   const insets = useSafeAreaInsets();
+  const { generateSeedPhrase } = useWorklet()
 
   useEffect(() => {
-    generateSeedPhrase();
+    generatePhrase();
   }, []);
 
-  const generateSeedPhrase = async () => {
+  const generatePhrase = async () => {
     setIsLoading(true);
     try {
       // In a real implementation, we would call the backend via IPC RPC
       // For demo purposes, we'll generate a mock seed phrase
-      const mockSeedPhrase = [
-        'apple', 'banana', 'carbon', 'diamond', 'elephant',
-        'fiction', 'guitar', 'harvest', 'island', 'journey',
-        'kitchen', 'lemon', 'mountain', 'network', 'oxygen',
-        'privacy', 'quantum', 'rocket', 'sunset', 'turtle'
-      ];
-      setSeedPhrase(mockSeedPhrase);
+      const phrase = await generateSeedPhrase()
+      console.log(phrase)
+      setSeedPhrase(phrase);
     } catch (error) {
       console.error('Error generating seed phrase:', error);
       Alert.alert('Error', 'Failed to generate seed phrase. Please try again.');
+      setIsLoading(false)
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleRefresh = () => {
-    generateSeedPhrase();
+    generatePhrase();
   };
 
   const handleConfirm = async () => {

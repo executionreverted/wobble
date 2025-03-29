@@ -38,4 +38,6 @@ export type ChatContextType = {
   sendMessage: (text: string) => Promise<void>;
 };
 
+export type SeedPhraseResponse = string[];
+
 export default {}

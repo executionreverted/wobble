@@ -7,18 +7,19 @@ import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from './contexts/AuthContext';
 import { ChatProvider } from './contexts/ChatContext';
 import AppNavigator from './App';
-import useWorklet from './hooks/useWorklet';
+import { WorkletProvider } from './contexts/WorkletContext';
 
 const App = () => {
-  useWorklet()
   return (
     <SafeAreaProvider>
       <StatusBar style="light" />
-      <AuthProvider>
-        <ChatProvider>
-          <AppNavigator />
-        </ChatProvider>
-      </AuthProvider>
+      <WorkletProvider>
+        <AuthProvider>
+          <ChatProvider>
+            <AppNavigator />
+          </ChatProvider>
+        </AuthProvider>
+      </WorkletProvider>
     </SafeAreaProvider>
   );
 };

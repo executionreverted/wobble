@@ -3,6 +3,7 @@ import { View, Text } from 'react-native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MaterialIcons } from '@expo/vector-icons';
+import { WorkletProvider } from './contexts/WorkletContext';
 
 import WelcomeScreen from './components/Welcome';
 import LoginScreen from './components/auth/Login';
