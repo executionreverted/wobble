@@ -1,133 +1,328 @@
-import React, { useState } from 'react';
-import { StyleSheet, View, SafeAreaView, Text } from 'react-native';
-import { useAuth } from './hooks/useAuth';
-import { useChat } from './hooks/useChat';
+import React, { useCallback, useReducer } from 'react'
+import { Alert, Linking, Platform, StyleSheet, Text, View } from 'react-native'
+import { MaterialIcons } from '@expo/vector-icons'
+import {
+  GiftedChat,
+  IMessage,
+  Send,
+  SendProps,
+  SystemMessage,
+} from 'react-native-gifted-chat'
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
+import NavBar from './components/common/NavBar'
+import AccessoryBar from './components/common/AccessoryBar'
+import CustomActions from './components/common/CustomActions'
+import CustomView from './components/common/CustomView'
+import earlierMessages from './utils/dummy/earlierMessages'
+import messagesData from './utils/dummy/messages'
+import * as Clipboard from 'expo-clipboard'
 
-import Login from './components/auth/Login';
-import Register from './components/auth/Register';
-import RoomList from './components/chat/RoomList';
-import Room from './components/chat/Room';
-import UserList from './components/chat/UserList';
-import { SwipeableDrawerLayout } from './components';
-import { COLORS } from './utils/constants';
+const user = {
+  _id: 1,
+  name: 'Developer',
+}
 
-const App: React.FC = () => {
-  const { user, isAuthenticated } = useAuth();
-  const { rooms, currentRoom, messages, onlineUsers, selectRoom, leaveRoom, sendMessage } = useChat();
-  const [showRegister, setShowRegister] = useState(false);
+// const otherUser = {
+//   _id: 2,
+//   name: 'React Native',
+//   avatar: 'https://facebook.github.io/react/img/logo_og.png',
+// }
 
-  // Handle back button press
-  const handleBackToRooms = () => {
-    leaveRoom();
-  };
+interface IState {
+  messages: any[]
+  step: number
+  loadEarlier?: boolean
+  isLoadingEarlier?: boolean
+  isTyping: boolean
+}
 
-  // Handle message send
-  const handleSendMessage = (text: string) => {
-    sendMessage(text);
-  };
+enum ActionKind {
+  SEND_MESSAGE = 'SEND_MESSAGE',
+  LOAD_EARLIER_MESSAGES = 'LOAD_EARLIER_MESSAGES',
+  LOAD_EARLIER_START = 'LOAD_EARLIER_START',
+  SET_IS_TYPING = 'SET_IS_TYPING',
+  // LOAD_EARLIER_END = 'LOAD_EARLIER_END',
+}
 
-  // Not authenticated - show login/register
-  if (!isAuthenticated) {
-    return (
-      <View style={styles.container}>
-        {showRegister ? (
-          <Register onLoginPress={() => setShowRegister(false)} />
-        ) : (
-          <Login
-            onRegisterPress={() => setShowRegister(true)}
-          />
-        )}
-      </View>
-    );
+// An interface for our actions
+interface StateAction {
+  type: ActionKind
+  payload?: any
+}
+
+function reducer(state: IState, action: StateAction) {
+  switch (action.type) {
+    case ActionKind.SEND_MESSAGE: {
+      return {
+        ...state,
+        step: state.step + 1,
+        messages: action.payload,
+      }
+    }
+    case ActionKind.LOAD_EARLIER_MESSAGES: {
+      return {
+        ...state,
+        loadEarlier: true,
+        isLoadingEarlier: false,
+        messages: action.payload,
+      }
+    }
+    case ActionKind.LOAD_EARLIER_START: {
+      return {
+        ...state,
+        isLoadingEarlier: true,
+      }
+    }
+    case ActionKind.SET_IS_TYPING: {
+      return {
+        ...state,
+        isTyping: action.payload,
+      }
+    }
   }
+}
 
-  // Create the left drawer content - room list
-  const leftDrawer = (
-    <RoomList
-      rooms={rooms}
-      onSelectRoom={selectRoom}
-      currentRoomId={currentRoom?.id || null}
-    />
-  );
+const App = () => {
+  const [state, dispatch] = useReducer(reducer, {
+    messages: messagesData,
+    step: 0,
+    loadEarlier: true,
+    isLoadingEarlier: false,
+    isTyping: false,
+  })
 
-  // Create the right drawer content - user list (only if a room is selected)
-  const rightDrawer = currentRoom && (
-    <UserList
-      users={onlineUsers}
-      currentUserId={user?.id || ''}
-    />
-  );
+  const onSend = useCallback(
+    (messages: any[]) => {
+      const sentMessages = [{ ...messages[0], sent: true, received: true }]
+      const newMessages = GiftedChat.append(
+        state.messages,
+        sentMessages,
+        Platform.OS !== 'web'
+      )
 
-  // Main content - room or empty state
-  const mainContent = currentRoom ? (
-    <Room
-      room={currentRoom}
-      messages={messages.filter(m => m.roomId === currentRoom.id)}
-      onlineUsers={onlineUsers}
-      currentUserId={user?.id || ''}
-      onBackPress={handleBackToRooms}
-      onSendMessage={handleSendMessage}
-    />
-  ) : (
-    <View style={styles.emptyContainer}>
-      {/* Empty state / welcome screen when no room selected */}
-      <View style={styles.welcomeContainer}>
-        <View style={styles.welcomeContent}>
-          <Text style={styles.welcomeTitle}>Welcome to Chat App</Text>
-          <Text style={styles.welcomeDesc}>Select a channel to start chatting</Text>
-          <Text style={styles.welcomeTip}>Swipe from left to see channels</Text>
-        </View>
-      </View>
-    </View>
-  );
+      dispatch({ type: ActionKind.SEND_MESSAGE, payload: newMessages })
+    },
+    [dispatch, state.messages]
+  )
+
+  const onLoadEarlier = useCallback(() => {
+    dispatch({ type: ActionKind.LOAD_EARLIER_START })
+    setTimeout(() => {
+      const newMessages = GiftedChat.prepend(
+        state.messages,
+        earlierMessages() as IMessage[],
+        Platform.OS !== 'web'
+      )
+
+      dispatch({ type: ActionKind.LOAD_EARLIER_MESSAGES, payload: newMessages })
+    }, 1500) // simulating network
+    // }, 15000) // for debug with long loading
+  }, [dispatch, state.messages])
+
+  const parsePatterns = useCallback(() => {
+    return [
+      {
+        pattern: /#(\w+)/,
+        style: { textDecorationLine: 'underline', color: 'darkorange' },
+        onPress: () => Linking.openURL('http://gifted.chat'),
+      },
+    ]
+  }, [])
+
+  const onLongPressAvatar = useCallback((pressedUser: any) => {
+    Alert.alert(JSON.stringify(pressedUser))
+  }, [])
+
+  const onPressAvatar = useCallback(() => {
+    Alert.alert('On avatar press')
+  }, [])
+
+  const handleLongPress = useCallback((context: unknown, currentMessage: any) => {
+    if (!currentMessage.text)
+      return
+
+    const options = [
+      'Copy text',
+      'Cancel',
+    ]
+
+    const cancelButtonIndex = options.length - 1
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ; (context as any).actionSheet().showActionSheetWithOptions(
+        {
+          options,
+          cancelButtonIndex,
+        },
+        (buttonIndex: number) => {
+          switch (buttonIndex) {
+            case 0:
+              Clipboard.setStringAsync(currentMessage?.text as any)
+              break
+            default:
+              break
+          }
+        }
+      )
+  }, [])
+
+  const onQuickReply = useCallback((replies: any[]) => {
+    const createdAt = new Date()
+    if (replies.length === 1)
+      onSend([
+        {
+          createdAt,
+          _id: Math.round(Math.random() * 1000000),
+          text: replies[0].title,
+          user,
+        },
+      ])
+    else if (replies.length > 1)
+      onSend([
+        {
+          createdAt,
+          _id: Math.round(Math.random() * 1000000),
+          text: replies.map(reply => reply.title).join(', '),
+          user,
+        },
+      ])
+    else
+      console.warn('replies param is not set correctly')
+  }, [])
+
+  const renderQuickReplySend = useCallback(() => {
+    return <Text>{' custom send =>'}</Text>
+  }, [])
+
+  const setIsTyping = useCallback(
+    (isTyping: boolean) => {
+      dispatch({ type: ActionKind.SET_IS_TYPING, payload: isTyping })
+    },
+    [dispatch]
+  )
+
+  const onSendFromUser = useCallback(
+    (messages: IMessage[] = []) => {
+      const createdAt = new Date()
+      const messagesToUpload = messages.map(message => ({
+        ...message,
+        user,
+        createdAt,
+        _id: Math.round(Math.random() * 1000000),
+      }))
+
+      onSend(messagesToUpload)
+    },
+    [onSend]
+  )
+
+  const renderAccessory = useCallback(() => {
+    return (
+      <AccessoryBar
+        onSend={onSendFromUser}
+        isTyping={() => setIsTyping(!state.isTyping)}
+      />
+    )
+  }, [onSendFromUser, setIsTyping, state.isTyping])
+
+  const renderCustomActions = useCallback(
+    (props: any) =>
+      Platform.OS === 'web'
+        ? null
+        : (
+          <CustomActions {...props} onSend={onSendFromUser} />
+        ),
+    [onSendFromUser]
+  )
+
+  const renderSystemMessage = useCallback((props: any) => {
+    return (
+      <SystemMessage
+        {...props}
+        containerStyle={{
+          marginBottom: 15,
+        }}
+        textStyle={{
+          fontSize: 14,
+        }}
+      />
+    )
+  }, [])
+
+  const renderCustomView = useCallback((props: any) => {
+    return <CustomView {...props} />
+  }, [])
+
+  const renderSend = useCallback((props: SendProps<IMessage>) => {
+    return (
+      <Send {...props} containerStyle={{ justifyContent: 'center', paddingHorizontal: 10 }}>
+        <MaterialIcons size={30} color={'tomato'} name={'send'} />
+      </Send>
+    )
+  }, [])
+
+  const insets = useSafeAreaInsets()
 
   return (
-    <SafeAreaView style={styles.container}>
-      <SwipeableDrawerLayout
-        leftDrawer={leftDrawer}
-        rightDrawer={rightDrawer}
-        showRightDrawer={!!currentRoom}
-      >
-        {mainContent}
-      </SwipeableDrawerLayout>
+    <SafeAreaView style={[styles.fill, styles.container]}>
+      <NavBar />
+      <View style={[styles.fill, styles.content]}>
+        <GiftedChat
+          messages={state.messages}
+          onSend={onSend}
+          loadEarlier={state.loadEarlier}
+          onLoadEarlier={onLoadEarlier}
+          isLoadingEarlier={state.isLoadingEarlier}
+          parsePatterns={parsePatterns}
+          user={user}
+          isScrollToBottomEnabled
+          onPressAvatar={onPressAvatar}
+          onLongPressAvatar={onLongPressAvatar}
+          onLongPress={handleLongPress}
+          onQuickReply={onQuickReply}
+          quickReplyStyle={{ borderRadius: 2 }}
+          quickReplyTextStyle={{
+            fontWeight: '200',
+          }}
+          renderQuickReplySend={renderQuickReplySend}
+          renderAccessory={renderAccessory}
+          renderActions={renderCustomActions}
+          renderSystemMessage={renderSystemMessage}
+          renderCustomView={renderCustomView}
+          renderSend={renderSend}
+          keyboardShouldPersistTaps='never'
+          timeTextStyle={{
+            left: { color: 'red' },
+            right: { color: 'yellow' },
+          }}
+          isTyping={state.isTyping}
+          inverted={Platform.OS !== 'web'}
+          infiniteScroll
+          bottomOffset={-insets.bottom}
+        />
+      </View>
     </SafeAreaView>
-  );
-};
+  )
+}
+
+const AppWrapper = () => {
+  return (
+    <SafeAreaProvider>
+      <App />
+    </SafeAreaProvider>
+  )
+}
 
 const styles = StyleSheet.create({
+  fill: {
+    flex: 1,
+  },
   container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: '#f5f5f5',
   },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: COLORS.background,
+  content: {
+    backgroundColor: '#ffffff',
   },
-  welcomeContainer: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  welcomeContent: {
-    alignItems: 'center',
-  },
-  welcomeTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginBottom: 16,
-  },
-  welcomeDesc: {
-    fontSize: 16,
-    color: '#b9bbbe',
-    marginBottom: 24,
-  },
-  welcomeTip: {
-    fontSize: 14,
-    color: '#7289da',
-    fontStyle: 'italic',
-  },
-});
+})
 
-export default App;
+export default AppWrapper
