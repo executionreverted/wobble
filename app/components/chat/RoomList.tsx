@@ -21,6 +21,7 @@ const RoomListScreen = () => {
 
   const handleSelectRoom = async (room: Room) => {
     await selectRoom(room);
+    // @ts-ignore
     navigation.navigate('Chat', { roomName: room.name });
   };
 

@@ -17,12 +17,15 @@ const Home = () => {
 
   const handleViewAllRooms = () => {
     // Navigate to the Rooms tab
+    // @ts-ignore
     navigation.navigate('MainTabs', { screen: 'Rooms' });
   };
 
-  const handleJoinRoom = (roomId) => {
+  const handleJoinRoom = (roomId: string) => {
     const room = rooms.find(r => r.id === roomId);
     if (room) {
+
+      // @ts-ignore
       navigation.navigate('Chat');
     }
   };
@@ -122,7 +125,7 @@ const Home = () => {
 };
 
 // Stat card component
-const StatCard = ({ icon, label, value, color = COLORS.primary }) => (
+const StatCard = ({ icon, label, value, color = COLORS.primary }: any) => (
   <View style={styles.statCard}>
     <View style={[styles.statIcon, { backgroundColor: color }]}>
       <MaterialIcons name={icon} size={24} color="#fff" />
@@ -133,7 +136,7 @@ const StatCard = ({ icon, label, value, color = COLORS.primary }) => (
 );
 
 // Feature card component
-const FeatureCard = ({ icon, title, description }) => (
+const FeatureCard = ({ icon, title, description }: any) => (
   <View style={styles.featureCard}>
     <View style={styles.featureIcon}>
       <MaterialIcons name={icon} size={24} color={COLORS.primary} />

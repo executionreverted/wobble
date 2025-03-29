@@ -9,7 +9,7 @@ const WelcomeScreen = () => {
   const insets = useSafeAreaInsets();
 
   const handleGetStarted = () => {
-    navigation.navigate('Home');
+    navigation.navigate('Login'); // Or another top-level route
   };
 
   return (

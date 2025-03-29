@@ -22,6 +22,7 @@ const LoginScreen = () => {
       } else {
         await register(username, password);
       }
+      // @ts-ignore
       navigation.navigate('MainTabs');
     } catch (error) {
       console.error('Auth error:', error);
