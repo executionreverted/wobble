@@ -119,7 +119,7 @@ class UserBase extends ReadyResource {
     this.replicate = opts.replicate !== false;
 
     // Room properties
-    this.userSeed = opts.userSeed || 'UnknownUser';
+    this.userSeed = opts.userSeed;
     this.messageListeners = [];
     // Register command handlers
     this._registerHandlers();

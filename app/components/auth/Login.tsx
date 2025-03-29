@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -9,12 +9,14 @@ import useUser from '@/app/hooks/useUser';
 
 const SeedPhraseLogin = () => {
   const [isLoading, setIsLoading] = useState(true);
+  const [loadingMessage, setLoadingMessage] = useState('Checking for existing account...');
   const navigation = useNavigation();
   const { user } = useUser();
   const insets = useSafeAreaInsets();
-  const { generateSeedPhrase, confirmSeedPhrase } = useWorklet()
+  const { generateSeedPhrase, confirmSeedPhrase, checkExistingUser } = useWorklet()
   const { seedPhrase } = useUser()
   const [navigated, setNavigated] = useState(false)
+  const [checkedExisting, setCheckedExisting] = useState(false)
 
 
   useEffect(() => {
@@ -23,6 +25,37 @@ const SeedPhraseLogin = () => {
       navigation.navigate('MainTabs');
     }
   }, [user])
+
+
+  useEffect(() => {
+    const checkForUser = async () => {
+      try {
+        setIsLoading(true);
+        setLoadingMessage('Checking for existing account...');
+
+        const result = await checkExistingUser();
+
+        if (!result.exists) {
+          // No existing user, generate a new seed phrase
+          setLoadingMessage('Generating new seed phrase...');
+          await generatePhrase();
+        }
+        // If user exists, the updateUser callback in WorkletContext will be called
+        // which will trigger the navigation effect above
+      } catch (error) {
+        console.error('Error checking for user:', error);
+        // Fall back to generating a new phrase
+        setLoadingMessage('Generating new seed phrase...');
+        await generatePhrase();
+      } finally {
+        setCheckedExisting(true);
+      }
+    };
+
+    if (!checkedExisting) {
+      checkForUser();
+    }
+  }, [checkedExisting]);
 
 
   useEffect(() => {
@@ -64,7 +97,20 @@ const SeedPhraseLogin = () => {
   };
 
 
+  if (isLoading) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+        <View style={styles.header}>
+          <Text style={styles.logo}>roombase</Text>
+        </View>
 
+        <View style={styles.loaderContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary} style={styles.spinner} />
+          <Text style={styles.loadingText}>{loadingMessage}</Text>
+        </View>
+      </View>
+    );
+  }
   return (
     <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <View style={styles.header}>
@@ -83,7 +129,7 @@ const SeedPhraseLogin = () => {
         ) : (
           <ScrollView style={styles.seedScrollView}>
             <View style={styles.seedGrid}>
-              {seedPhrase.map((word, index) => (
+              {seedPhrase?.map((word, index) => (
                 <View key={index} style={styles.wordContainer}>
                   <Text style={styles.wordNumber}>{index + 1}.</Text>
                   <Text style={styles.word}>{word}</Text>
@@ -151,6 +197,12 @@ const styles = StyleSheet.create({
     marginTop: 20,
     height: 300,
   },
+  loaderContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -159,6 +211,11 @@ const styles = StyleSheet.create({
   loadingText: {
     color: COLORS.textSecondary,
     fontSize: 16,
+    marginTop: 20,
+    textAlign: 'center',
+  },
+  spinner: {
+    marginBottom: 20,
   },
   seedScrollView: {
     flex: 1,
@@ -236,5 +293,4 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
 });
-
 export default SeedPhraseLogin;

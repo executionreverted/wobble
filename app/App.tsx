@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text } from 'react-native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -11,6 +11,8 @@ import RoomListScreen from './components/chat/RoomList';
 import Room from './components/chat/Room';
 import { COLORS } from './utils/constants';
 import useUser from './hooks/useUser';
+import Loader from './components/common/Loading';
+import useWorklet from './hooks/useWorklet';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -76,6 +78,26 @@ const SettingsPlaceholder = () => {
 const AppNavigator = () => {
   const { user } = useUser();
   const isAuthenticated = !!user
+
+  const { isInitialized, isLoading } = useWorklet();
+  const [appReady, setAppReady] = useState(false);
+
+  // Wait for worklet initialization to complete
+  useEffect(() => {
+    if (isInitialized && !isLoading) {
+      // Add a small delay to ensure everything is loaded
+      const timer = setTimeout(() => {
+        setAppReady(true);
+      }, 500);
+
+      return () => clearTimeout(timer);
+    }
+  }, [isInitialized, isLoading]);
+
+  // Show loader if app is not ready yet
+  if (!appReady) {
+    return <Loader message="Setting up your secure connection..." />;
+  }
 
   return (
     <Stack.Navigator

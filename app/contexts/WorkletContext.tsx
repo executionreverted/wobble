@@ -13,6 +13,7 @@ export interface WorkletContextType {
   error: Error | null;
   generateSeedPhrase: () => Promise<string[]>;
   confirmSeedPhrase: (seed: string) => any;
+  checkExistingUser: () => {}
 }
 
 export const WorkletContext = createContext<WorkletContextType>(undefined as any);
@@ -63,6 +64,20 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
               updateUser(parsedData)
             }
 
+            if (req.command === 'userCheckResult') {
+              try {
+                const data = b4a.toString(req.data)
+                const parsedData = JSON.parse(data)
+                console.log('User check result:', parsedData)
+
+                if (parsedData.exists && parsedData.user) {
+                  updateUser(parsedData.user)
+                }
+              } catch (e) {
+                console.error('Error handling userCheckResult:', e)
+              }
+            }
+
           }
         );
 
@@ -70,11 +85,15 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
         setRpcClient(client);
         setIsInitialized(true);
         setError(null);
+
+        setTimeout(() => {
+          const checkUserRequest = client.request('checkUserExists');
+          checkUserRequest.send("")
+          setIsLoading(false)
+        }, 500);
       } catch (err) {
         console.error('Failed to initialize worklet:', err);
         setError(err instanceof Error ? err : new Error('Unknown error initializing worklet'));
-      } finally {
-        setIsLoading(false);
       }
     };
 
@@ -126,13 +145,39 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     }
   }, [rpcClient]);
 
+  const checkExistingUser = useCallback(async (): Promise<{ exists: boolean, user?: any, error?: string }> => {
+    if (!rpcClient) {
+      console.error('RPC client not initialized');
+      return { exists: false, error: 'RPC client not initialized' };
+    }
+
+    try {
+      const request = rpcClient.request('checkUserExists');
+      await request.send();
+
+      // The actual result will be processed in the RPC event handler
+      // and will update the user state through updateUser
+
+      return { exists: true };
+    } catch (err) {
+      console.error('Failed to check existing user:', err);
+      return {
+        exists: false,
+        error: err instanceof Error ? err.message : 'Failed to check existing user'
+      };
+    }
+  }, [rpcClient]);
+
+
+
   const value = {
     worklet,
     isInitialized,
     isLoading,
     error,
     generateSeedPhrase,
-    confirmSeedPhrase
+    confirmSeedPhrase,
+    checkExistingUser
   };
 
   return (
