@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { Worklet } from 'react-native-bare-kit';
 import { Platform } from 'react-native';
+import RPC from 'bare-rpc'
 // @ts-ignore
 import bundle from '../app.bundle';
 
@@ -12,11 +13,28 @@ export const useWorklet = () => {
       const newWorklet = new Worklet();
       newWorklet.start('/app.bundle', bundle, [Platform.OS]);
       setWorklet(newWorklet);
+      const { IPC }: any = worklet
+      // Initialise RPC
+      new RPC(IPC, (req) => {
+        // Handle incoming RPC requests
+
+        if (req.command === 'message') {
+
+        }
+
+        if (req.command === 'reset') {
+
+        }
+
+
+      })
       return newWorklet;
     } catch (error) {
       console.error('Failed to initialize worklet:', error);
       return null;
     }
+
+
   }, []);
 
   const teardown = useCallback(() => {

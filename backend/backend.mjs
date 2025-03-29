@@ -14,6 +14,7 @@ const path =
 
 const rpc = new RPC(IPC, (req, error) => {
   // Handle two way communication here
+  console.log(req)
 })
 
 // For a clean start
