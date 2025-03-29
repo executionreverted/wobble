@@ -1,5 +1,4 @@
-import './utils/gesture-handler.native.js';
-
+import './utils/gesture-handler.js';
 
 import React from 'react';
 import { registerRootComponent } from 'expo';
@@ -22,6 +21,7 @@ const Root = () => {
     </SafeAreaProvider>
   );
 };
+
 
 registerRootComponent(Root);
 

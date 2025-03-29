@@ -95,4 +95,7 @@ export const MOCK_MESSAGES = [
 ];
 
 
+export const PRIVATE_CORESTORE = "privbase"
+export const PRIVATE_AUTOBASE = "privbase"
+
 export default {}
