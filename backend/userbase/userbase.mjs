@@ -126,7 +126,6 @@ class UserBase extends ReadyResource {
     this.replicate = opts.replicate !== false;
 
     // Room properties
-    this.userPubKey = opts.userPubKey || crypto.randomUUID();
     this.userSeed = opts.userSeed || 'UnknownUser';
     this.messageListeners = [];
     // Register command handlers
