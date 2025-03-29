@@ -3,7 +3,6 @@ import { View, Text } from 'react-native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MaterialIcons } from '@expo/vector-icons';
-import { WorkletProvider } from './contexts/WorkletContext';
 
 import WelcomeScreen from './components/Welcome';
 import LoginScreen from './components/auth/Login';
@@ -11,7 +10,7 @@ import HomeScreen from './components/Home';
 import RoomListScreen from './components/chat/RoomList';
 import Room from './components/chat/Room';
 import { COLORS } from './utils/constants';
-import { useAuth } from './hooks/useAuth';
+import useUser from './hooks/useUser';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -75,7 +74,8 @@ const SettingsPlaceholder = () => {
 
 // Root navigation component without NavigationContainer
 const AppNavigator = () => {
-  const { isAuthenticated } = useAuth();
+  const { user } = useUser();
+  const isAuthenticated = !!user
 
   return (
     <Stack.Navigator

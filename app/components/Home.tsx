@@ -3,12 +3,12 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'rea
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAuth } from '../hooks/useAuth';
 import { useChat } from '../hooks/useChat';
 import { COLORS } from '../utils/constants';
+import useUser from '../hooks/useUser';
 
 const Home = () => {
-  const { user } = useAuth();
+  const { user } = useUser();
   const { rooms } = useChat();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();

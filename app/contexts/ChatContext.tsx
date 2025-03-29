@@ -1,7 +1,7 @@
 import React, { createContext, useState, useContext } from 'react';
 import { Room, Message, User, ChatContextType } from '../types';
-import { AuthContext } from './AuthContext';
 import { MOCK_ROOMS, MOCK_MESSAGES, MOCK_USERS } from '../utils/constants';
+import useUser from '../hooks/useUser';
 
 // Default context values
 const defaultChatContext: ChatContextType = {
@@ -21,7 +21,7 @@ interface ChatProviderProps {
 }
 
 export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
-  const { user } = useContext(AuthContext);
+  const { user } = useUser();
 
   // Use mock data for UI development
   const [rooms, setRooms] = useState<Room[]>(MOCK_ROOMS);
@@ -39,7 +39,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         ...prev,
         {
           id: user.id,
-          username: user.username,
+          username: user.name,
           isOnline: true
         }
       ]);
@@ -58,7 +58,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       id: `msg_${Date.now()}`,
       roomId: currentRoom.id,
       userId: user.id,
-      username: user.username,
+      username: user.name,
       text,
       timestamp: Date.now()
     };

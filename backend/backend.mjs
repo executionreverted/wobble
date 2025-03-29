@@ -31,13 +31,16 @@ const sendSeed = () => {
 
 const rpc = new RPC(IPC, (req, error) => {
   console.log('Received RPC request:', req.command)
+
   if (req.command === 'generateSeed') {
     sendSeed()
   }
 
 
   if (req.command === 'confirmSeed') {
-    createNewAccount()
+    const data = b4a.toString(req.data)
+    const parsedData = JSON.parse(data)
+    createNewAccount(parsedData)
   }
 
 })
@@ -53,6 +56,10 @@ if (fs.existsSync(path)) {
 const createNewAccount = async (seed) => {
   if (hasAccount()) {
     return { exists: true }
+  }
+
+  if (!seed || seed.length == 0) {
+    return { invalidSeed: true }
   }
 
   try {

@@ -12,7 +12,7 @@ export interface WorkletContextType {
   isLoading: boolean;
   error: Error | null;
   generateSeedPhrase: () => Promise<string[]>;
-  confirmSeedPhrase: () => Promise<string[]>;
+  confirmSeedPhrase: (seed: string) => any;
 }
 
 export const WorkletContext = createContext<WorkletContextType>(undefined as any);
@@ -22,7 +22,7 @@ export interface WorkletProviderProps {
 }
 
 export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) => {
-  const { storeSeedPhrase } = useUser()
+  const { updateUser, storeSeedPhrase } = useUser()
   const [worklet, setWorklet] = useState<Worklet | null>(null);
   const [rpcClient, setRpcClient] = useState<any>(null);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -54,6 +54,14 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
                 console.error(e)
               }
             }
+
+            if (req.command === 'userInfo') {
+              const data = b4a.toString(req.data)
+              const parsedData = JSON.parse(data)
+              console.log(parsedData)
+              updateUser(parsedData)
+            }
+
           }
         );
 
@@ -103,6 +111,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     try {
       const request = rpcClient.request('confirmSeed');
       await request.send(JSON.stringify(seedPhrase));
+      return { success: true, error: "" }
     } catch (err) {
       console.error('Failed to confirm seed phrase:', err);
       return {
@@ -122,8 +131,10 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
   };
 
   return (
-    <WorkletContext.Provider value={value}>
+    <WorkletContext.Provider value={value as any}>
       {children}
     </WorkletContext.Provider>
   );
 };
+
+export default WorkletProvider

@@ -4,7 +4,6 @@ import React from 'react';
 import { registerRootComponent } from 'expo';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import { AuthProvider } from './contexts/AuthContext';
 import { ChatProvider } from './contexts/ChatContext';
 import AppNavigator from './App';
 import { WorkletProvider } from './contexts/WorkletContext';
@@ -18,11 +17,9 @@ const App = () => {
 
       <UserProvider>
         <WorkletProvider>
-          <AuthProvider>
-            <ChatProvider>
-              <AppNavigator />
-            </ChatProvider>
-          </AuthProvider>
+          <ChatProvider>
+            <AppNavigator />
+          </ChatProvider>
         </WorkletProvider>
       </UserProvider>
 

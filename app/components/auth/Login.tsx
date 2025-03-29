@@ -3,7 +3,6 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'rea
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useAuth } from '../../hooks/useAuth';
 import { COLORS } from '../../utils/constants';
 import useWorklet from '@/app/hooks/useWorklet';
 import useUser from '@/app/hooks/useUser';
@@ -11,9 +10,9 @@ import useUser from '@/app/hooks/useUser';
 const SeedPhraseLogin = () => {
   const [isLoading, setIsLoading] = useState(true);
   const navigation = useNavigation();
-  const { login } = useAuth();
+  const { user } = useUser();
   const insets = useSafeAreaInsets();
-  const { generateSeedPhrase } = useWorklet()
+  const { generateSeedPhrase, confirmSeedPhrase } = useWorklet()
   const { seedPhrase } = useUser()
 
   useEffect(() => {
@@ -43,7 +42,10 @@ const SeedPhraseLogin = () => {
     // In a real implementation, we would store the seed phrase
     // For now, we'll just log in the user
     try {
-      await login('Seed User');
+      if (!seedPhrase || seedPhrase.length == 0) {
+        throw new Error("Invalid seed")
+      }
+      await confirmSeedPhrase()
       // @ts-ignore
       navigation.navigate('MainTabs');
     } catch (error) {

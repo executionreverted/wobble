@@ -4,18 +4,11 @@ import Autobase from 'autobase';
 import BlindPairing from 'blind-pairing';
 import HyperDB from 'hyperdb';
 import Hyperswarm from 'hyperswarm';
-import Hyperblobs from 'hyperblobs';
 import ReadyResource from 'ready-resource';
 import z32 from 'z32';
 import b4a from 'b4a';
-import { Router, dispatch } from './spec/hyperdispatch/index.js';
-import db from './spec/db/index.js';
-import crypto from 'bare-crypto';
-import { getEncoding } from './spec/hyperdispatch/messages.js';
-import fs, { writeFileSync } from 'bare-fs';
-import path from 'path';
-import { sanitizeTextForTerminal } from './.utils.mjs';
-import Hypercore from 'hypercore';
+import { Router, dispatch } from './spec/hyperdispatch/index.mjs';
+import db from './spec/db/index.mjs';
 
 
 class UserBasePairer extends ReadyResource {
@@ -221,6 +214,7 @@ class UserBase extends ReadyResource {
     const existingUser = await this.getUserInfo();
     if (!existingUser) {
       // Store basic room info
+
       const newUser = {
         id: this.userPubKey,
         seed: this.userSeed,

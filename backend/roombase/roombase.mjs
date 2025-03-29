@@ -7,13 +7,13 @@ import Hyperblobs from 'hyperblobs';
 import ReadyResource from 'ready-resource';
 import z32 from 'z32';
 import b4a from 'b4a';
-import { Router, dispatch } from './spec/hyperdispatch/index.js';
-import db from './spec/db/index.js';
+import { Router, dispatch } from './spec/hyperdispatch/index.mjs';
+import db from './spec/db/index.mjs';
 import crypto from 'bare-crypto';
-import { getEncoding } from './spec/hyperdispatch/messages.js';
-import fs, { writeFileSync } from 'bare-fs';
-import path from 'path';
-import { sanitizeTextForTerminal } from './.utils.mjs';
+import { getEncoding } from './spec/hyperdispatch/messages.mjs';
+import fs from 'bare-fs';
+import path from 'bare-path';
+import { sanitizeTextForTerminal } from './utils.mjs';
 import Hypercore from 'hypercore';
 
 

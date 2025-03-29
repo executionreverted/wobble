@@ -4,20 +4,21 @@
 /* eslint-disable quotes */
 
 const VERSION = 1
-const { c } = require('hyperschema/runtime')
+import pkg from 'hyperdispatch/runtime.js';
+const { c } = pkg;
 
 // eslint-disable-next-line no-unused-vars
 let version = VERSION
 
 // @userbase/writer
 const encoding0 = {
-  preencode (state, m) {
+  preencode(state, m) {
     c.buffer.preencode(state, m.key)
   },
-  encode (state, m) {
+  encode(state, m) {
     c.buffer.encode(state, m.key)
   },
-  decode (state) {
+  decode(state) {
     const r0 = c.buffer.decode(state)
 
     return {
@@ -28,19 +29,19 @@ const encoding0 = {
 
 // @userbase/invite
 const encoding1 = {
-  preencode (state, m) {
+  preencode(state, m) {
     c.buffer.preencode(state, m.id)
     c.buffer.preencode(state, m.invite)
     c.buffer.preencode(state, m.publicKey)
     c.int.preencode(state, m.expires)
   },
-  encode (state, m) {
+  encode(state, m) {
     c.buffer.encode(state, m.id)
     c.buffer.encode(state, m.invite)
     c.buffer.encode(state, m.publicKey)
     c.int.encode(state, m.expires)
   },
-  decode (state) {
+  decode(state) {
     const r0 = c.buffer.decode(state)
     const r1 = c.buffer.decode(state)
     const r2 = c.buffer.decode(state)
@@ -57,7 +58,7 @@ const encoding1 = {
 
 // @userbase/metadata
 const encoding2 = {
-  preencode (state, m) {
+  preencode(state, m) {
     c.string.preencode(state, m.id)
     c.string.preencode(state, m.name)
     c.string.preencode(state, m.status)
@@ -67,7 +68,7 @@ const encoding2 = {
     if (m.contacts) c.string.preencode(state, m.contacts)
     if (m.rooms) c.string.preencode(state, m.rooms)
   },
-  encode (state, m) {
+  encode(state, m) {
     const flags =
       (m.contacts ? 1 : 0) |
       (m.rooms ? 2 : 0)
@@ -81,7 +82,7 @@ const encoding2 = {
     if (m.contacts) c.string.encode(state, m.contacts)
     if (m.rooms) c.string.encode(state, m.rooms)
   },
-  decode (state) {
+  decode(state) {
     const r0 = c.string.decode(state)
     const r1 = c.string.decode(state)
     const r2 = c.string.decode(state)
@@ -99,27 +100,27 @@ const encoding2 = {
   }
 }
 
-function setVersion (v) {
+function setVersion(v) {
   version = v
 }
 
-function encode (name, value, v = VERSION) {
+function encode(name, value, v = VERSION) {
   version = v
   return c.encode(getEncoding(name), value)
 }
 
-function decode (name, buffer, v = VERSION) {
+function decode(name, buffer, v = VERSION) {
   version = v
   return c.decode(getEncoding(name), buffer)
 }
 
-function getEnum (name) {
+function getEnum(name) {
   switch (name) {
     default: throw new Error('Enum not found ' + name)
   }
 }
 
-function getEncoding (name) {
+function getEncoding(name) {
   switch (name) {
     case '@userbase/writer': return encoding0
     case '@userbase/invite': return encoding1
@@ -128,18 +129,18 @@ function getEncoding (name) {
   }
 }
 
-function getStruct (name, v = VERSION) {
+function getStruct(name, v = VERSION) {
   const enc = getEncoding(name)
   return {
-    preencode (state, m) {
+    preencode(state, m) {
       version = v
       enc.preencode(state, m)
     },
-    encode (state, m) {
+    encode(state, m) {
       version = v
       enc.encode(state, m)
     },
-    decode (state) {
+    decode(state) {
       version = v
       return enc.decode(state)
     }
@@ -148,4 +149,4 @@ function getStruct (name, v = VERSION) {
 
 const resolveStruct = getStruct // compat
 
-module.exports = { resolveStruct, getStruct, getEnum, getEncoding, encode, decode, setVersion, version }
+export { resolveStruct, getStruct, getEnum, getEncoding, encode, decode, setVersion, version }
