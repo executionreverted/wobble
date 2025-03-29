@@ -35,6 +35,11 @@ const rpc = new RPC(IPC, (req, error) => {
     sendSeed()
   }
 
+
+  if (req.command === 'confirmSeed') {
+    createNewAccount()
+  }
+
 })
 
 // For a clean start
@@ -45,13 +50,38 @@ if (fs.existsSync(path)) {
   })
 }
 
-
-
 const createNewAccount = async (seed) => {
-  if (hasAccount()) return;
-  fs.mkdirSync(userBasePath)
-  userBase = new UserBase(new Corestore(userBasePath), { userSeed: seed })
-  await userBase.ready()
+  if (hasAccount()) {
+    return { exists: true }
+  }
+
+  try {
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(userBasePath)) {
+      fs.mkdirSync(userBasePath, { recursive: true })
+    }
+
+    // Initialize corestore
+    const store = new Corestore(userBasePath)
+    await store.ready()
+
+    // Create userbase
+    userBase = new UserBase(store, { userSeed: seed })
+    await userBase.ready()
+
+    const user = await userBase.getUserData()
+    const req = rpc.request('userInfo')
+    req.send(JSON.stringify(user))
+
+    // Return success with user ID
+    return {
+      success: true,
+      user
+    }
+  } catch (err) {
+    console.error('Error creating account:', err)
+    return { success: false, error: err.message }
+  }
 }
 
 const hasAccount = () => {

@@ -12,9 +12,10 @@ export interface WorkletContextType {
   isLoading: boolean;
   error: Error | null;
   generateSeedPhrase: () => Promise<string[]>;
+  confirmSeedPhrase: () => Promise<string[]>;
 }
 
-export const WorkletContext = createContext<WorkletContextType | undefined>(undefined);
+export const WorkletContext = createContext<WorkletContextType>(undefined as any);
 
 export interface WorkletProviderProps {
   children: ReactNode;
@@ -92,12 +93,32 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     }
   }, [rpcClient]);
 
+
+  const confirmSeedPhrase = useCallback(async (seedPhrase: string[]): Promise<{ success: boolean, userId?: string, error?: string }> => {
+    if (!rpcClient) {
+      console.error('NO RPC');
+      return { success: false, error: 'RPC client not initialized' };
+    }
+
+    try {
+      const request = rpcClient.request('confirmSeed');
+      await request.send(JSON.stringify(seedPhrase));
+    } catch (err) {
+      console.error('Failed to confirm seed phrase:', err);
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : 'Failed to confirm seed phrase'
+      };
+    }
+  }, [rpcClient]);
+
   const value = {
     worklet,
     isInitialized,
     isLoading,
     error,
-    generateSeedPhrase
+    generateSeedPhrase,
+    confirmSeedPhrase
   };
 
   return (
