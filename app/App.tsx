@@ -1,117 +1,129 @@
-import { View, Platform, StyleSheet } from 'react-native';
-import Room from './components/chat/Room';
-import Home from './components/Home';
+import React from 'react';
+import { View, Text } from 'react-native';
+import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Easing } from 'react-native-reanimated';
-import { Text, PlatformPressable } from '@react-navigation/elements';
-import { useLinkBuilder, useTheme } from '@react-navigation/native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { MaterialIcons } from '@expo/vector-icons';
 
-function MyTabBar({ state, descriptors, navigation }: any) {
-  const { colors } = useTheme();
-  const { buildHref } = useLinkBuilder();
+import WelcomeScreen from './components/Welcome';
+import LoginScreen from './components/auth/Login';
+import HomeScreen from './components/Home';
+import RoomListScreen from './components/chat/RoomList';
+import Room from './components/chat/Room';
+import { COLORS } from './utils/constants';
+import { useAuth } from './hooks/useAuth';
 
+const Stack = createStackNavigator();
+const Tab = createBottomTabNavigator();
+
+// Main tabs for authenticated users
+const MainTabs = () => {
   return (
-    <View style={{ flexDirection: 'row' }}>
-      {state.routes.map((route: any, index: any) => {
-        const { options } = descriptors[route.key];
-        const label =
-          options.tabBarLabel !== undefined
-            ? options.tabBarLabel
-            : options.title !== undefined
-              ? options.title
-              : route.name;
+    <Tab.Navigator
+      screenOptions={{
+        tabBarStyle: {
+          backgroundColor: COLORS.tertiaryBackground,
+          borderTopColor: COLORS.separator,
+        },
+        tabBarActiveTintColor: COLORS.primary,
+        tabBarInactiveTintColor: COLORS.textMuted,
+        headerShown: false,
+      }}
+    >
+      <Tab.Screen
+        name="Home"
+        component={HomeScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialIcons name="home" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Rooms"
+        component={RoomListScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialIcons name="forum" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="Settings"
+        component={SettingsPlaceholder}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <MaterialIcons name="settings" size={size} color={color} />
+          ),
+        }}
+      />
+    </Tab.Navigator>
+  );
+};
 
-        const isFocused = state.index === index;
-
-        const onPress = () => {
-          const event = navigation.emit({
-            type: 'tabPress',
-            target: route.key,
-            canPreventDefault: true,
-          });
-
-          if (!isFocused && !event.defaultPrevented) {
-            navigation.navigate(route.name, route.params);
-          }
-        };
-
-        const onLongPress = () => {
-          navigation.emit({
-            type: 'tabLongPress',
-            target: route.key,
-          });
-        };
-
-        return (
-          <PlatformPressable
-            href={buildHref(route.name, route.params)}
-            accessibilityState={isFocused ? { selected: true } : {}}
-            accessibilityLabel={options.tabBarAccessibilityLabel}
-            testID={options.tabBarButtonTestID}
-            onPress={onPress}
-            onLongPress={onLongPress}
-            style={{ flex: 1 }}
-          >
-            <Text style={{ color: isFocused ? colors.primary : colors.text }}>
-              {label}
-            </Text>
-          </PlatformPressable>
-        );
-      })}
+// Placeholder for settings (not implemented)
+const SettingsPlaceholder = () => {
+  return (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background }}>
+      <MaterialIcons name="settings" size={48} color={COLORS.textMuted} />
+      <Text style={{ color: COLORS.textPrimary, fontSize: 18, marginTop: 16 }}>
+        Settings would go here
+      </Text>
     </View>
   );
-}
+};
 
-const AppTabs = createBottomTabNavigator({
-  tabBar: (props) => <MyTabBar {...props} />,
-  screens: {
-    Home: Home,
-    Chat: Room,
-  },
-});
+// Root navigation component without NavigationContainer
+const AppNavigator = () => {
+  const { isAuthenticated } = useAuth();
 
-function AppScreen() {
   return (
-    <SafeAreaView style={[styles.fill, styles.container]}>
-      <AppTabs.Navigator
-        screenOptions={{
-          transitionSpec: {
-            animation: 'timing',
-            config: {
-              duration: 150,
-              easing: Easing.inOut(Easing.ease),
-            },
-          },
-          sceneStyleInterpolator: ({ current }) => ({
-            sceneStyle: {
-              opacity: current.progress.interpolate({
-                inputRange: [-1, 0, 1],
-                outputRange: [0, 1, 0],
-              }),
-            },
-          }),
-        }}
-      >
-        <AppTabs.Screen name="Home" component={Home} />
-        <AppTabs.Screen name="Chat" component={Room} />
-      </AppTabs.Navigator>
-    </SafeAreaView>
+    <Stack.Navigator
+      screenOptions={{
+        headerStyle: {
+          backgroundColor: COLORS.tertiaryBackground,
+        },
+        headerTintColor: COLORS.textPrimary,
+        headerTitleStyle: {
+          fontWeight: 'bold',
+        },
+      }}
+      initialRouteName={isAuthenticated ? 'MainTabs' : 'Welcome'}
+    >
+      {isAuthenticated ? (
+        <>
+          <Stack.Screen
+            name="MainTabs"
+            component={MainTabs}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="Chat"
+            component={Room}
+            options={({ route }: any) => ({
+              title: route.params?.roomName || 'Chat',
+              headerBackTitle: 'Back'
+            })}
+          />
+        </>
+      ) : (
+        <>
+          <Stack.Screen
+            name="Welcome"
+            component={WelcomeScreen}
+            options={{ headerShown: false }}
+          />
+          <Stack.Screen
+            name="Login"
+            component={LoginScreen}
+            options={{
+              headerShown: false,
+              animationTypeForReplace: 'pop'
+            }}
+          />
+        </>
+      )}
+    </Stack.Navigator>
   );
-}
+};
 
-
-
-const styles = StyleSheet.create({
-  fill: {
-    flex: 1,
-  },
-  container: {
-    backgroundColor: '#f5f5f5',
-  },
-  content: {
-    backgroundColor: '#ffffff',
-  },
-})
-
-export default AppScreen
+export default AppNavigator;
