@@ -215,6 +215,12 @@ const rpc = new RPC(IPC, (req, error) => {
     sendMessage(parsedData)
   }
 
+  if (req.command === 'uploadFile') {
+    const data = b4a.toString(req.data);
+    // Call the async handler function
+    handleFileUpload(data);
+  }
+
 
   if (req.command === 'loadMoreMessages') {
     const data = b4a.toString(req.data);
@@ -1357,6 +1363,160 @@ const reinitializeBackend = async () => {
   }
 };
 
+const handleFileUpload = async (fileData) => {
+  try {
+    const fileInfo = JSON.parse(fileData);
+
+    // Get user info to add proper sender name
+    const userData = userBase ? await userBase.getUserData() : null;
+
+    // Add sender info to fileInfo if available
+    if (userData && userData.name) {
+      fileInfo.sender = userData.name;
+    } else {
+      fileInfo.sender = 'Unknown User';
+    }
+
+    // Call the uploadFileToRoom function
+    await uploadFileToRoom(fileInfo);
+  } catch (error) {
+    console.error('Error handling file upload:', error);
+
+    // Send error response back to client
+    const response = {
+      success: false,
+      error: error.message || 'Unknown error handling file upload'
+    };
+
+    const errorReq = rpc.request('fileUploaded');
+    errorReq.send(JSON.stringify(response));
+  }
+};
+
+// Modified uploadFileToRoom function with better path handling
+const uploadFileToRoom = async (fileInfo) => {
+  try {
+    const { roomId, name, type, path, data, size, sender } = fileInfo;
+
+    if (!roomId || !name || (!path && !data)) {
+      throw new Error('Missing required file information');
+    }
+
+    // Get room instance
+    const room = roomBases[roomId];
+    if (!room) {
+      throw new Error(`Room ${roomId} not found or not initialized`);
+    }
+
+    await room.ready();
+
+    let fileBuffer;
+
+    // If path is provided, read the file
+    if (path) {
+      try {
+        // For React Native/Expo file URIs, we need to handle them differently
+        // Log for debugging
+        console.log(`Attempting to read file from path: ${path}`);
+
+        // Native file path handling
+        if (path.startsWith('file://')) {
+          // Strip the file:// prefix if present
+          const realPath = path.replace('file://', '');
+          console.log(`Reading from adjusted path: ${realPath}`);
+
+          try {
+            // Direct attempt to read the file
+            fileBuffer = await fs.promises.readFile(realPath);
+            console.log(`Successfully read file, size: ${fileBuffer.length} bytes`);
+          } catch (directReadErr) {
+            console.error(`Error with direct read: ${directReadErr.message}`);
+
+            // Fall back to base64 if the client provides it
+            if (data) {
+              console.log('Falling back to base64 data');
+              fileBuffer = b4a.from(data, 'base64');
+            } else {
+              throw directReadErr;
+            }
+          }
+        } else {
+          // For non-file URIs
+          fileBuffer = await fs.promises.readFile(path);
+        }
+      } catch (readErr) {
+        console.error(`Error reading file from path ${path}:`, readErr);
+
+        // Fall back to base64 if the client provides it
+        if (data) {
+          console.log('Falling back to base64 data after path read error');
+          fileBuffer = b4a.from(data, 'base64');
+        } else {
+          throw new Error(`Could not read file: ${readErr.message}`);
+        }
+      }
+    }
+    // Otherwise use base64 data if provided
+    else if (data) {
+      console.log('Using provided base64 data');
+      fileBuffer = b4a.from(data, 'base64');
+    }
+
+    if (!fileBuffer) {
+      throw new Error('No file data available');
+    }
+
+    // Log size of file buffer
+    console.log(`File buffer size: ${fileBuffer.length} bytes`);
+
+    // Upload to the room's blob store
+    const attachment = await room.uploadFile(fileBuffer, name, {
+      metadata: { type }
+    });
+
+    if (!attachment) {
+      throw new Error('Failed to upload file to blob store');
+    }
+
+    // Create a message with the attachment
+    const messageData = {
+      id: `file-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`,
+      roomId,
+      content: `📄 Shared file: ${attachment.name} (${attachment.size} bytes)`,
+      sender: sender || 'System',
+      timestamp: Date.now(),
+      hasAttachments: true,
+      attachments: JSON.stringify([attachment])
+    };
+
+    // Send the message
+    await room.sendMessage(messageData);
+
+    // Send success response
+    const response = {
+      success: true,
+      message: messageData
+    };
+
+    const req = rpc.request('fileUploaded');
+    req.send(JSON.stringify(response));
+
+    return true;
+
+  } catch (error) {
+    console.error('Error uploading file to room:', error);
+
+    const response = {
+      success: false,
+      error: error.message || 'Unknown error uploading file'
+    };
+
+    const req = rpc.request('fileUploaded');
+    req.send(JSON.stringify(response));
+
+    return false;
+  }
+};
 const joinRoomByInvite = async (params) => {
   const { inviteCode } = params;
 

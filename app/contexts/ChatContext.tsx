@@ -311,16 +311,23 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     setCurrentRoom(null);
   };
 
-  const sendMessage = async (text: string) => {
+  const sendMessage = async (text: string, attachments?: any[]) => {
     if (!currentRoom || !user || !rpcClient || !isInitialized) return;
 
     try {
-      const messageData = {
+      // Create the message data
+      const messageData: any = {
         roomId: currentRoom.id,
         content: text,
         sender: user.name,
         timestamp: Date.now()
       };
+
+      // If attachments are provided, add them to the message
+      if (attachments && attachments.length > 0) {
+        messageData.hasAttachments = true;
+        messageData.attachments = JSON.stringify(attachments);
+      }
 
       console.log('ChatContext: Sending message:', messageData);
       const request = rpcClient.request('sendMessage');

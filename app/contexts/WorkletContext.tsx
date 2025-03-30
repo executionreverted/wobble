@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { Worklet } from 'react-native-bare-kit';
-import { Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import RPC from 'bare-rpc';
 // @ts-ignore
 import bundle from '../app.bundle';
@@ -350,6 +350,83 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
                 console.error('Error handling olderMessages:', e);
               }
             }
+            if (req.command === 'fileUploaded') {
+              try {
+                const data = b4a.toString(req.data);
+                const parsedData = JSON.parse(data);
+                console.log('File uploaded response:', parsedData);
+
+                if (parsedData.success && parsedData.message) {
+                  // The server already sent a message with the attachment, no need to do anything more
+                  console.log('Message with attachment has been added successfully');
+                } else {
+                  console.error('File upload failed:', parsedData.error || 'Unknown error');
+                }
+              } catch (e) {
+                console.error('Error handling fileUploaded:', e);
+              }
+            }
+
+
+            if (req.command === 'fileDownloaded') {
+              try {
+                const data = b4a.toString(req.data);
+                const parsedData = JSON.parse(data);
+                console.log('File download response:', parsedData);
+
+                if (parsedData.success) {
+                  // For mobile, we can save the file to the device's filesystem
+                  if (Platform.OS !== 'web') {
+                    const saveFile = async () => {
+                      try {
+                        // Convert base64 data to file
+                        const fileUri = FileSystem.documentDirectory + parsedData.fileName;
+                        await FileSystem.writeAsStringAsync(fileUri, parsedData.data, {
+                          encoding: FileSystem.EncodingType.Base64
+                        });
+
+                        // Show success message with options to view/share
+                        Alert.alert(
+                          'Download Complete',
+                          `File saved to: ${fileUri}`,
+                          [
+                            { text: 'OK' },
+                            {
+                              text: 'Share',
+                            }
+                          ]
+                        );
+                      } catch (err) {
+                        console.error('Error saving downloaded file:', err);
+                        Alert.alert('Download Error', 'Failed to save the file.');
+                      }
+                    };
+
+                    saveFile();
+                  } else {
+                    // For web, we can create a download link
+                    const blob = b64toBlob(parsedData.data, parsedData.mimeType);
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = parsedData.fileName;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                  }
+                } else {
+                  Alert.alert('Download Failed', parsedData.error || 'Could not download file.');
+                }
+              } catch (e) {
+                console.error('Error handling fileDownloaded:', e);
+                Alert.alert('Download Error', 'An error occurred processing the downloaded file.');
+              }
+            }
+
+
+
+
           }
         );
         const r = client.request("reinitialize")

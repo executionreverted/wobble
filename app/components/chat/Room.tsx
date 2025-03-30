@@ -10,22 +10,89 @@ import {
   Platform,
   ActivityIndicator,
   Keyboard,
-  Alert
+  Alert,
+  Image
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
 import { useChat } from '../../hooks/useChat';
 import { COLORS } from '../../utils/constants';
 import useUser from '../../hooks/useUser';
+import useWorklet from '../../hooks/useWorklet';
 import { formatTimestamp } from '../../utils/helpers';
 import RoomHeader from './RoomHeader';
 
+// File attachment component
+const FileAttachment = ({ attachment, onPress }: any) => {
+  // Helper function to get icon based on file extension
+  const getFileIcon = (fileName: string) => {
+    const ext: string = fileName?.split('.')?.pop()?.toLowerCase() as string;
+    if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) return 'image';
+    if (['pdf'].includes(ext)) return 'picture-as-pdf';
+    if (['doc', 'docx'].includes(ext)) return 'description';
+    if (['xls', 'xlsx'].includes(ext)) return 'table-chart';
+    if (['ppt', 'pptx'].includes(ext)) return 'slideshow';
+    if (['zip', 'rar', '7z'].includes(ext)) return 'folder-zip';
+    if (['mp3', 'wav', 'ogg'].includes(ext)) return 'audiotrack';
+    if (['mp4', 'mov', 'avi'].includes(ext)) return 'videocam';
+    return 'insert-drive-file';
+  };
+
+  // Format file size
+  const formatFileSize = (bytes: any) => {
+    if (bytes < 1024) return bytes + ' B';
+    else if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    else if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    else return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+  };
+
+  return (
+    <TouchableOpacity style={styles.attachmentContainer} onPress={() => onPress(attachment)}>
+      <View style={styles.attachmentIconContainer}>
+        <MaterialIcons name={getFileIcon(attachment.name)} size={24} color={COLORS.primary} />
+      </View>
+      <View style={styles.attachmentDetails}>
+        <Text style={styles.attachmentName} numberOfLines={1}>{attachment.name}</Text>
+        <Text style={styles.attachmentSize}>{formatFileSize(attachment.size)}</Text>
+      </View>
+      <MaterialIcons name="download" size={24} color={COLORS.primary} style={styles.downloadIcon} />
+    </TouchableOpacity>
+  );
+};
+
+// Image attachment component
+const ImageAttachment = ({ attachment, onPress }: any) => {
+  // For simplicity, we'll use a placeholder image
+  // In a real app, you'd need to implement image loading and caching
+  return (
+    <TouchableOpacity
+      style={styles.imageAttachmentContainer}
+      onPress={() => onPress(attachment)}
+    >
+      <View style={styles.imageAttachmentPlaceholder}>
+        <MaterialIcons name="image" size={48} color={COLORS.primary} />
+        <Text style={styles.attachmentName} numberOfLines={1}>{attachment.name}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
 // Message component to render each chat message
-const MessageItem = ({ message, isOwnMessage }: any) => {
+const MessageItem = ({ message, isOwnMessage, onAttachmentPress }) => {
   if (!message) return null;
+
+  // Check if message has attachments
+  const hasAttachments = message.hasAttachments &&
+    (message.attachments && (Array.isArray(message.attachments) || typeof message.attachments === 'string'));
+
+  // Parse attachments if they're a string
+  const attachments = hasAttachments ?
+    (typeof message.attachments === 'string' ?
+      JSON.parse(message.attachments) : message.attachments) : [];
 
   return (
     <View style={[
@@ -41,6 +108,28 @@ const MessageItem = ({ message, isOwnMessage }: any) => {
         isOwnMessage ? styles.ownMessageContent : styles.otherMessageContent
       ]}>
         <Text style={styles.messageText}>{message.content || ''}</Text>
+
+        {/* Render attachments if present */}
+        {hasAttachments && attachments.length > 0 && (
+          <View style={styles.attachmentsContainer}>
+            {attachments.map((attachment: any, index: number) => {
+              const fileExt = attachment.name.split('.').pop().toLowerCase();
+              const isImage = ['jpg', 'jpeg', 'png', 'gif'].includes(fileExt);
+
+              return isImage ?
+                <ImageAttachment
+                  key={`img-${index}`}
+                  attachment={attachment}
+                  onPress={onAttachmentPress}
+                /> :
+                <FileAttachment
+                  key={`file-${index}`}
+                  attachment={attachment}
+                  onPress={onAttachmentPress}
+                />;
+            })}
+          </View>
+        )}
       </View>
 
       <Text style={[
@@ -81,16 +170,18 @@ const DateHeader = ({ date }: any) => {
 const EnhancedChatRoom = () => {
   const { currentRoom, messages, sendMessage, loadMoreMessages } = useChat();
   const { user } = useUser();
+  const { rpcClient } = useWorklet();
   const [messageText, setMessageText] = useState('');
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [inputHeight, setInputHeight] = useState(44); // Default single line height
+  const [isUploading, setIsUploading] = useState(false);
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const flatListRef = useRef(null);
 
   // Handle text input content size change
-  const handleContentSizeChange = (event) => {
+  const handleContentSizeChange = (event: any) => {
     const { height } = event.nativeEvent.contentSize;
     // Constrain height between min and max values
     const newHeight = Math.min(Math.max(44, height), 120); // min: ~1 line, max: ~4 lines
@@ -160,97 +251,203 @@ const EnhancedChatRoom = () => {
       await sendMessage(messageText.trim());
       setMessageText('');
       setInputHeight(44); // Reset input height to single line
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error sending message:', error);
+      Alert.alert('Error', 'Failed to send message. Please try again.');
     }
   };
 
-  // Function to handle photo selection
+  // For photo selection
   const handleSelectPhoto = async () => {
+    if (!currentRoom?.id) return;
     setShowAttachmentOptions(false);
 
     try {
       let result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ['images'],
         allowsEditing: false,
         quality: 0.8,
-        allowsMultipleSelection: false,
+        allowsMultipleSelection: false
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const selectedAsset = result.assets[0];
-        console.log('Selected photo:', {
-          uri: selectedAsset.uri,
-          type: selectedAsset.mimeType || 'image/jpeg',
-          name: selectedAsset.fileName || 'photo.jpg',
-          size: selectedAsset.fileSize || 0,
-        });
 
-        // Here you'd typically upload the file or attach it to a message
-        // For now we're just logging it
-        Alert.alert('Photo Selected', `File: ${selectedAsset.fileName || 'photo.jpg'}`);
+        // Extract file name from URI or use a default
+        const fileName = selectedAsset.fileName ||
+          `image_${Date.now()}.${selectedAsset.uri.split('.').pop() || 'jpg'}`;
+
+        // Upload the file using path
+        if (rpcClient) {
+          setIsUploading(true);
+
+          try {
+            // Create upload request
+            const request = rpcClient.request('uploadFile');
+
+            // Construct file info with path
+            const fileInfo = {
+              roomId: currentRoom?.id,
+              name: fileName,
+              type: selectedAsset.mimeType || 'image/jpeg',
+              path: selectedAsset.uri,
+              size: selectedAsset.fileSize || 0
+            };
+
+            // Send upload request
+            await request.send(JSON.stringify(fileInfo));
+          } finally {
+            setIsUploading(false);
+          }
+        }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error selecting photo:', error);
-      Alert.alert('Error', 'Failed to select photo');
+      Alert.alert('Error', 'Failed to select photo: ' + error.message);
+      setIsUploading(false);
     }
   };
 
-  // Function to handle document selection
+  // For camera capture
+  const handleCameraCapture = async () => {
+    if (!currentRoom || !currentRoom.id) return;
+    setShowAttachmentOptions(false);
+
+    try {
+      let result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images', 'videos'],
+        allowsEditing: false,
+        quality: 0.8
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const selectedAsset = result.assets[0];
+
+        // Generate file name
+        const fileName = `camera_${Date.now()}.jpg`;
+
+        // Upload the file using path
+        if (rpcClient) {
+          setIsUploading(true);
+
+          try {
+            // Create upload request
+            const request = rpcClient.request('uploadFile');
+
+            // Construct file info with path
+            const fileInfo = {
+              roomId: currentRoom?.id,
+              name: fileName,
+              type: 'image/jpeg',
+              path: selectedAsset.uri,
+              size: selectedAsset.fileSize || 0
+            };
+
+            // Send upload request
+            await request.send(JSON.stringify(fileInfo));
+          } finally {
+            setIsUploading(false);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error capturing photo:', error);
+      Alert.alert('Error', 'Failed to capture photo: ' + error.message);
+      setIsUploading(false);
+    }
+  };
+
+  // For document selection
   const handleSelectDocument = async () => {
+
+    if (!currentRoom || !currentRoom.id) return;
     setShowAttachmentOptions(false);
 
     try {
       const result = await DocumentPicker.getDocumentAsync({
-        type: '*/*', // All file types
+        type: '*/*',
         copyToCacheDirectory: true,
       });
 
       if (result.canceled === false && result.assets && result.assets.length > 0) {
         const file = result.assets[0];
-        console.log('Selected file:', {
-          uri: file.uri,
-          type: file.mimeType,
-          name: file.name,
-          size: file.size,
-        });
 
-        // Here you'd typically upload the file or attach it to a message
-        // For now we're just logging it
-        Alert.alert('File Selected', `File: ${file.name}, Size: ${(file.size / 1024).toFixed(2)} KB`);
+        if (rpcClient) {
+          setIsUploading(true);
+
+          try {
+            // Create upload request
+            const request = rpcClient.request('uploadFile');
+
+            // Construct file info with path
+            const fileInfo = {
+              roomId: currentRoom.id,
+              name: file.name,
+              type: file.mimeType,
+              path: file.uri,
+              size: file.size
+            };
+
+            // Send upload request
+            await request.send(JSON.stringify(fileInfo));
+          } finally {
+            setIsUploading(false);
+          }
+        }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error selecting document:', error);
-      Alert.alert('Error', 'Failed to select document');
+      Alert.alert('Error', 'Failed to select document: ' + error.message);
+      setIsUploading(false);
     }
   };
 
-  // Function to handle camera capture
-  const handleCameraCapture = async () => {
-    setShowAttachmentOptions(false);
+  // Function to handle attachment press/download
+  const handleAttachmentPress = async (attachment: any) => {
+
+    if (!currentRoom || !currentRoom.id) return;
+    if (!attachment || !attachment.blobId) {
+      Alert.alert('Error', 'Invalid attachment data');
+      return;
+    }
 
     try {
-      let result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        quality: 0.8,
-      });
+      Alert.alert(
+        'Download File',
+        `Do you want to download "${attachment.name}"?`,
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel'
+          },
+          {
+            text: 'Download',
+            onPress: async () => {
+              try {
+                setIsUploading(true); // Reuse uploading state for download
 
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const selectedAsset = result.assets[0];
-        console.log('Camera capture:', {
-          uri: selectedAsset.uri,
-          type: selectedAsset.mimeType || 'image/jpeg',
-          name: 'camera_photo.jpg',
-          size: selectedAsset.fileSize || 0,
-        });
+                // Request file download from backend
+                const request = rpcClient.request('downloadFile');
+                await request.send(JSON.stringify({
+                  roomId: currentRoom.id,
+                  attachment: attachment
+                }));
 
-        // Here you'd typically upload the file or attach it to a message
-        Alert.alert('Photo Captured', 'Camera photo captured successfully');
-      }
+                // Show success message (actual download will be handled by the operating system)
+                Alert.alert('Download Started', 'Your file download has started');
+              } catch (err) {
+                console.error('Error downloading file:', err);
+                Alert.alert('Download Failed', 'Could not download the file');
+              } finally {
+                setIsUploading(false);
+              }
+            }
+          }
+        ]
+      );
     } catch (error) {
-      console.error('Error capturing photo:', error);
-      Alert.alert('Error', 'Failed to capture photo');
+      console.error('Error handling attachment:', error);
+      Alert.alert('Error', 'Failed to handle attachment');
     }
   };
 
@@ -272,6 +469,7 @@ const EnhancedChatRoom = () => {
       <MessageItem
         message={item}
         isOwnMessage={isOwnMessage}
+        onAttachmentPress={handleAttachmentPress}
       />
     );
   };
@@ -321,6 +519,15 @@ const EnhancedChatRoom = () => {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
+      {isUploading && (
+        <View style={styles.uploadingOverlay}>
+          <View style={styles.uploadingContainer}>
+            <ActivityIndicator size="large" color={COLORS.primary} />
+            <Text style={styles.uploadingText}>Processing file...</Text>
+          </View>
+        </View>
+      )}
+
       <View style={styles.chatContainer}>
         <FlatList
           ref={flatListRef}
@@ -369,7 +576,6 @@ const EnhancedChatRoom = () => {
             </View>
           </>
         )}
-
 
         <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
           <TouchableOpacity style={styles.attachmentButton} onPress={toggleAttachmentOptions}>
@@ -475,7 +681,6 @@ const styles = StyleSheet.create({
   messageText: {
     fontSize: 15,
     color: COLORS.textPrimary,
-    lineHeight: 20,
   },
   messageTimestamp: {
     fontSize: 10,
@@ -607,6 +812,75 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textSecondary,
   },
-});
+  // Attachment styles
+  attachmentsContainer: {
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+    paddingTop: 8,
+  },
+  attachmentContainer: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(0,0,0,0.1)',
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 8,
+    alignItems: 'center',
+  },
+  attachmentIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  attachmentDetails: {
+    flex: 1,
+  },
+  attachmentName: {
+    fontSize: 14,
+    color: COLORS.textPrimary,
+    marginBottom: 2,
+  },
+  attachmentSize: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+  },
+  downloadIcon: {
+    marginLeft: 8,
+  },
+  imageAttachmentContainer: {
+    marginBottom: 8,
+  },
+  imageAttachmentPlaceholder: {
+    width: '100%',
+    height: 150,
+    backgroundColor: 'rgba(0,0,0,0.1)',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  uploadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    zIndex: 999,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  uploadingContainer: {
+    backgroundColor: COLORS.background,
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
+    width: '80%',
+  },
+  uploadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: COLORS.textPrimary
+  }
+})
 
-export default EnhancedChatRoom;
+export default EnhancedChatRoom
