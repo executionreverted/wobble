@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS } from '../../utils/constants';
 import useUser from '../../hooks/useUser';
 import useWorklet from '../../hooks/useWorklet';
+import ResetAppButton from '../common/ResetAppButton'; // Import the new component
 
 const Profile = () => {
   const { user, updateUser } = useUser();
@@ -182,6 +183,17 @@ const Profile = () => {
           </TouchableOpacity>
         </View>
       )}
+
+      {/* Add the Reset App button section */}
+      <View style={styles.resetSection}>
+        <Text style={styles.resetTitle}>Advanced Options</Text>
+        <Text style={styles.resetDescription}>
+          Warning: Resetting the app will delete all your data and cannot be undone.
+        </Text>
+        <View style={styles.resetButtonContainer}>
+          <ResetAppButton />
+        </View>
+      </View>
     </ScrollView>
   );
 };
@@ -346,6 +358,26 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     textAlign: 'center',
     marginTop: 40,
+  },
+  resetSection: {
+    backgroundColor: COLORS.secondaryBackground,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+  },
+  resetTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.textPrimary,
+    marginBottom: 8,
+  },
+  resetDescription: {
+    fontSize: 14,
+    color: COLORS.error,
+    marginBottom: 16,
+  },
+  resetButtonContainer: {
+    alignItems: 'center',
   },
 });
 

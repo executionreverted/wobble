@@ -28,6 +28,7 @@ const getDataPath = () => {
     ? '/data/data/to.holepunch.bare.expo/autopass-example'
     : './tmp/autopass-example';
 
+  return basePath;
   // Append instance ID if provided
   return instanceId ? `${basePath}-${instanceId}` : basePath;
 };
@@ -116,6 +117,11 @@ const rpc = new RPC(IPC, (req, error) => {
 
   if (req.command === 'teardown') {
     teardown()
+  }
+
+
+  if (req.command === 'resetAppState') {
+    resetAppState();
   }
 
   // Add this to your RPC command handlers:
@@ -1551,3 +1557,74 @@ if (isBackendInitialized) {
     console.error('Error during room pre-initialization:', err);
   });
 }
+
+
+
+
+// Complete app reset function for testing
+// Simplified reset function that wipes directories instead of individual files
+
+const resetAppState = async () => {
+  try {
+    console.log('Performing complete app reset...');
+
+    // First clean up all existing resources
+    await cleanupResources();
+
+    // Reset all state variables
+    userCorestore = null;
+    userBase = null;
+    roomBases = {};
+    roomCorestores = {};
+    roomBlobStores = {};
+    roomBlobCores = {};
+    seedProvided = false;
+    isBackendInitialized = false;
+
+    // Re-create directories from scratch (wipes all content)
+    try {
+      // First try to remove directories if they exist
+      if (fs.existsSync(userBasePath)) {
+        fs.rmSync(userBasePath, { recursive: true, force: true });
+      }
+
+      if (fs.existsSync(roomBasePath)) {
+        fs.rmSync(roomBasePath, { recursive: true, force: true });
+      }
+
+      // Then recreate the directories fresh and empty
+      fs.mkdirSync(userBasePath, { recursive: true });
+      fs.mkdirSync(roomBasePath, { recursive: true });
+
+      console.log('Recreated empty directories');
+    } catch (dirErr) {
+      console.error('Error recreating directories:', dirErr);
+      // Continue even if directory recreation fails
+    }
+
+    // Notify client that reset is complete
+    const response = {
+      success: true,
+      message: 'App state completely reset'
+    };
+
+    const req = rpc.request('appResetComplete');
+    req.send(JSON.stringify(response));
+
+    console.log('App reset complete');
+    return true;
+  } catch (error) {
+    console.error('Error during app reset:', error);
+
+    // Notify client of error
+    const response = {
+      success: false,
+      error: error.message || 'Unknown error during app reset'
+    };
+
+    const req = rpc.request('appResetComplete');
+    req.send(JSON.stringify(response));
+
+    return false;
+  }
+};

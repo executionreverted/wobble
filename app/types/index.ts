@@ -47,6 +47,11 @@ export type ChatContextType = {
   refreshRooms: () => Promise<void>;
   createRoom: (name: string, description: string) => Promise<{ success: boolean, roomId: string }>;
   loadMoreMessages: () => Promise<boolean>;
+  setCurrentRoom?: any
+  setMessagesByRoom?: any
+  setOnlineUsers?: any
+  setRooms?: any
+  reset?: any
 };
 
 export type SeedPhraseResponse = string[];

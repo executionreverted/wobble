@@ -1,5 +1,5 @@
 import React, { createContext, useState, useEffect, useCallback, ReactNode } from 'react';
-import { Alert } from 'react-native';
+import { resetRegistry } from './resetSystem';
 // Define the User type
 export interface UserData {
   id: string;
@@ -22,6 +22,8 @@ export interface UserContextType {
   storeSeedPhrase: any;
   updateUser: (user: UserData) => {},
   getUserPublicKey: () => Promise<string | null>;
+  setUser?: any;
+  reset?: () => void;
 }
 
 // Create the context with default values
@@ -104,6 +106,26 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
     }
   }, [user]);
 
+
+  const reset = useCallback(() => {
+    setUser(null);
+    setSeedPhrase(null);
+    setIsAuthenticated(false);
+    setIsLoading(false);
+    setError(null);
+    console.log('UserContext reset complete');
+  }, []);
+
+
+  useEffect(() => {
+    resetRegistry.register('UserContext', { reset });
+
+    return () => {
+      resetRegistry.unregister('UserContext');
+    };
+  }, [reset]);
+
+
   // Create the context value
   const value: UserContextType = {
     user,
@@ -114,6 +136,7 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
     storeSeedPhrase: setSeedPhrase,
     updateUser,
     getUserPublicKey,
+    setUser
   };
 
   // Provide the context

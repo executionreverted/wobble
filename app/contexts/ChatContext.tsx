@@ -19,7 +19,8 @@ const defaultChatContext: ChatContextType = {
   sendMessage: async () => { },
   refreshRooms: async () => { },
   createRoom: async () => { return { success: false, roomId: '' } },
-  loadMoreMessages: async () => false
+  loadMoreMessages: async () => false,
+  reset: () => { }
 };
 
 export const ChatContext = createContext<ChatContextType>(defaultChatContext);
@@ -453,9 +454,13 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         selectRoom,
         leaveRoom,
         sendMessage,
-        refreshRooms,
+        refreshRooms: refreshRooms as any,
         createRoom,
-        loadMoreMessages
+        loadMoreMessages,
+        setCurrentRoom,
+        setMessagesByRoom,
+        setOnlineUsers,
+        setRooms
       }}
     >
       {children}

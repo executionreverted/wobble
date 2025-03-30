@@ -9,20 +9,21 @@ import AppNavigator from './App';
 import { WorkletProvider } from './contexts/WorkletContext';
 import { UserProvider } from './contexts/UserContext';
 
+import { ResetProvider } from './contexts/ResetProvider';
 
 const App = () => {
   return (
     <SafeAreaProvider>
       <StatusBar style="light" />
-
-      <UserProvider>
-        <WorkletProvider>
-          <ChatProvider>
-            <AppNavigator />
-          </ChatProvider>
-        </WorkletProvider>
-      </UserProvider>
-
+      <ResetProvider>
+        <UserProvider>
+          <WorkletProvider>
+            <ChatProvider>
+              <AppNavigator />
+            </ChatProvider>
+          </WorkletProvider>
+        </UserProvider>
+      </ResetProvider>
     </SafeAreaProvider>
   );
 };

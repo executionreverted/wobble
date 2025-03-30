@@ -13,6 +13,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { COLORS } from '../../utils/constants';
 import * as Clipboard from 'expo-clipboard';
+import QRCode from 'react-native-qrcode-svg';
 
 interface ShareRoomProps {
   visible: boolean;
@@ -122,6 +123,16 @@ const ShareRoomModal: React.FC<ShareRoomProps> = ({
               </View>
             ) : (
               <>
+                <View style={styles.qrContainer}>
+                  <QRCode
+                    value={inviteCode}
+                    size={180}
+                    color={COLORS.textPrimary}
+                    backgroundColor={COLORS.tertiaryBackground}
+                    logoBackgroundColor={COLORS.tertiaryBackground}
+                  />
+                </View>
+
                 <View style={styles.inviteCodeContainer}>
                   <Text style={styles.inviteCodeLabel}>Invite Code:</Text>
                   <TouchableOpacity
@@ -142,7 +153,7 @@ const ShareRoomModal: React.FC<ShareRoomProps> = ({
                 </View>
 
                 <Text style={styles.instructionText}>
-                  Share this invite code with people you want to join this room.
+                  Share this invite code or scan the QR code to join this room.
                   Anyone with this code can join the room.
                 </Text>
 
@@ -240,6 +251,14 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
     marginBottom: 20,
     textAlign: 'center',
+  },
+  qrContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    padding: 20,
+    backgroundColor: COLORS.tertiaryBackground,
+    borderRadius: 12,
   },
   loadingContainer: {
     alignItems: 'center',

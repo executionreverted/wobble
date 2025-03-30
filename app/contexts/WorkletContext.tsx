@@ -7,6 +7,7 @@ import bundle from '../app.bundle';
 import b4a from "b4a"
 import useUser from '../hooks/useUser';
 import { Room, Message } from '../types';
+import resetRegistry from './resetSystem';
 
 // Use variables instead of state for callbacks
 let updateRooms: ((rooms: Room[]) => void) | undefined = undefined;
@@ -48,13 +49,38 @@ export interface WorkletProviderProps {
 }
 
 export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) => {
-  const { updateUser, storeSeedPhrase } = useUser();
+  const { updateUser, storeSeedPhrase, setUser } = useUser();
   const [worklet, setWorklet] = useState<Worklet | null>(null);
   const [rpcClient, setRpcClient] = useState<any>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const [isBackendReady, setIsBackendReady] = useState(false);
+  const reset = useCallback(() => {
+    // Reset callback references
+    updateRooms = undefined;
+    updateMessages = undefined;
+    onRoomCreated = undefined;
+    onRoomJoined = undefined;
+    onInviteGenerated = undefined;
+
+    // Don't reset worklet or RPC client as they are needed for communication
+    // Just reset state
+    setIsBackendReady(false);
+    setError(null);
+
+    console.log('WorkletContext reset complete');
+  }, []);
+
+  // Register with the reset registry on mount
+  useEffect(() => {
+    resetRegistry.register('WorkletContext', { reset });
+
+    return () => {
+      resetRegistry.unregister('WorkletContext');
+    };
+  }, [reset]);
+
 
   // Initialize worklet on component mount
   useEffect(() => {
@@ -514,7 +540,6 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
 
     return false
   }, [rpcClient]);
-
 
   const value = {
     worklet,
