@@ -10,162 +10,23 @@ import {
   Platform,
   ActivityIndicator,
   Keyboard,
-  Alert,
-  Image
+  Alert
 } from 'react-native';
+import Message, { SystemMessage } from './Message';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import * as MediaLibrary from "expo-media-library"
+import * as FileSystem from "expo-file-system"
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
 import { useChat } from '../../hooks/useChat';
 import { COLORS } from '../../utils/constants';
 import useUser from '../../hooks/useUser';
 import useWorklet from '../../hooks/useWorklet';
-import { formatTimestamp } from '../../utils/helpers';
 import RoomHeader from './RoomHeader';
 
-// File attachment component
-const FileAttachment = ({ attachment, onPress }: any) => {
-  // Helper function to get icon based on file extension
-  const getFileIcon = (fileName: string) => {
-    const ext: string = fileName?.split('.')?.pop()?.toLowerCase() as string;
-    if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) return 'image';
-    if (['pdf'].includes(ext)) return 'picture-as-pdf';
-    if (['doc', 'docx'].includes(ext)) return 'description';
-    if (['xls', 'xlsx'].includes(ext)) return 'table-chart';
-    if (['ppt', 'pptx'].includes(ext)) return 'slideshow';
-    if (['zip', 'rar', '7z'].includes(ext)) return 'folder-zip';
-    if (['mp3', 'wav', 'ogg'].includes(ext)) return 'audiotrack';
-    if (['mp4', 'mov', 'avi'].includes(ext)) return 'videocam';
-    return 'insert-drive-file';
-  };
-
-  // Format file size
-  const formatFileSize = (bytes: any) => {
-    if (bytes < 1024) return bytes + ' B';
-    else if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    else if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-    else return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
-  };
-
-  return (
-    <TouchableOpacity style={styles.attachmentContainer} onPress={() => onPress(attachment)}>
-      <View style={styles.attachmentIconContainer}>
-        <MaterialIcons name={getFileIcon(attachment.name)} size={24} color={COLORS.primary} />
-      </View>
-      <View style={styles.attachmentDetails}>
-        <Text style={styles.attachmentName} numberOfLines={1}>{attachment.name}</Text>
-        <Text style={styles.attachmentSize}>{formatFileSize(attachment.size)}</Text>
-      </View>
-      <MaterialIcons name="download" size={24} color={COLORS.primary} style={styles.downloadIcon} />
-    </TouchableOpacity>
-  );
-};
-
-// Image attachment component
-const ImageAttachment = ({ attachment, onPress }: any) => {
-  // For simplicity, we'll use a placeholder image
-  // In a real app, you'd need to implement image loading and caching
-  return (
-    <TouchableOpacity
-      style={styles.imageAttachmentContainer}
-      onPress={() => onPress(attachment)}
-    >
-      <View style={styles.imageAttachmentPlaceholder}>
-        <MaterialIcons name="image" size={48} color={COLORS.primary} />
-        <Text style={styles.attachmentName} numberOfLines={1}>{attachment.name}</Text>
-      </View>
-    </TouchableOpacity>
-  );
-};
-
-// Message component to render each chat message
-const MessageItem = ({ message, isOwnMessage, onAttachmentPress }) => {
-  if (!message) return null;
-
-  // Check if message has attachments
-  const hasAttachments = message.hasAttachments &&
-    (message.attachments && (Array.isArray(message.attachments) || typeof message.attachments === 'string'));
-
-  // Parse attachments if they're a string
-  const attachments = hasAttachments ?
-    (typeof message.attachments === 'string' ?
-      JSON.parse(message.attachments) : message.attachments) : [];
-
-  return (
-    <View style={[
-      styles.messageContainer,
-      isOwnMessage ? styles.ownMessageContainer : styles.otherMessageContainer
-    ]}>
-      {!isOwnMessage && (
-        <Text style={styles.messageSender}>{message.sender || 'Unknown'}</Text>
-      )}
-
-      <View style={[
-        styles.messageContent,
-        isOwnMessage ? styles.ownMessageContent : styles.otherMessageContent
-      ]}>
-        <Text style={styles.messageText}>{message.content || ''}</Text>
-
-        {/* Render attachments if present */}
-        {hasAttachments && attachments.length > 0 && (
-          <View style={styles.attachmentsContainer}>
-            {attachments.map((attachment: any, index: number) => {
-              const fileExt = attachment.name.split('.').pop().toLowerCase();
-              const isImage = ['jpg', 'jpeg', 'png', 'gif'].includes(fileExt);
-
-              return isImage ?
-                <ImageAttachment
-                  key={`img-${index}`}
-                  attachment={attachment}
-                  onPress={onAttachmentPress}
-                /> :
-                <FileAttachment
-                  key={`file-${index}`}
-                  attachment={attachment}
-                  onPress={onAttachmentPress}
-                />;
-            })}
-          </View>
-        )}
-      </View>
-
-      <Text style={[
-        styles.messageTimestamp,
-        isOwnMessage ? styles.ownMessageTimestamp : styles.otherMessageTimestamp
-      ]}>
-        {formatTimestamp(message.timestamp || Date.now())}
-      </Text>
-    </View>
-  );
-};
-
-// System message component
-const SystemMessage = ({ message }: any) => {
-  if (!message) return null;
-
-  return (
-    <View style={styles.systemMessageContainer}>
-      <Text style={styles.systemMessageText}>{message.content || ''}</Text>
-      <Text style={styles.systemMessageTimestamp}>
-        {formatTimestamp(message.timestamp || Date.now())}
-      </Text>
-    </View>
-  );
-};
-
 // Date header component to show date separators
-const DateHeader = ({ date }: any) => {
-  return (
-    <View style={styles.dateHeaderContainer}>
-      <View style={styles.dateHeaderLine} />
-      <Text style={styles.dateHeaderText}>{date}</Text>
-      <View style={styles.dateHeaderLine} />
-    </View>
-  );
-};
 
 const EnhancedChatRoom = () => {
   const { currentRoom, messages, sendMessage, loadMoreMessages } = useChat();
@@ -195,24 +56,37 @@ const EnhancedChatRoom = () => {
     setShowAttachmentOptions(prev => !prev);
   };
 
-  // Request permissions on component mount
   useEffect(() => {
     (async () => {
       if (Platform.OS !== 'web') {
-        // Request media library permissions
-        const mediaLibraryPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (mediaLibraryPermission.status !== 'granted') {
+        // Request media library permissions for saving images
+        const mediaPermission = await MediaLibrary.requestPermissionsAsync();
+        if (mediaPermission.status !== 'granted') {
           console.log('Media library permission not granted');
         }
 
-        // Request camera permissions
-        const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
-        if (cameraPermission.status !== 'granted') {
-          console.log('Camera permission not granted');
+        // Request file system permissions for saving files
+        // const filePermission = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+        // if (!filePermission.granted) {
+        //   console.log('File system permission not granted');
+        // }
+        if (Platform.OS !== 'web' as any) {
+          // Request media library permissions
+          const mediaLibraryPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (mediaLibraryPermission.status !== 'granted') {
+            console.log('Media library permission not granted');
+          }
+
+          // Request camera permissions
+          const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
+          if (cameraPermission.status !== 'granted') {
+            console.log('Camera permission not granted');
+          }
         }
       }
     })();
   }, []);
+
 
   // Add keyboard listeners to track keyboard visibility
   useEffect(() => {
@@ -350,7 +224,7 @@ const EnhancedChatRoom = () => {
           }
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error capturing photo:', error);
       Alert.alert('Error', 'Failed to capture photo: ' + error.message);
       setIsUploading(false);
@@ -465,11 +339,12 @@ const EnhancedChatRoom = () => {
     // Check if the message is from the current user
     const isOwnMessage = user && user.name && item.sender === user.name;
 
+    // Use our enhanced message component with proper room ID
     return (
-      <MessageItem
+      <Message
         message={item}
-        isOwnMessage={isOwnMessage}
-        onAttachmentPress={handleAttachmentPress}
+        isOwnMessage={isOwnMessage as boolean}
+        roomId={currentRoom?.id as any}
       />
     );
   };

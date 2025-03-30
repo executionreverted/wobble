@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { Worklet } from 'react-native-bare-kit';
+import * as FileSystem from "expo-file-system"
 import { Alert, Platform } from 'react-native';
 import RPC from 'bare-rpc';
 // @ts-ignore
@@ -8,7 +9,7 @@ import b4a from "b4a"
 import useUser from '../hooks/useUser';
 import { Room, Message } from '../types';
 import resetRegistry from './resetSystem';
-
+import * as MediaLibrary from "expo-media-library"
 // Use variables instead of state for callbacks
 let updateRooms: ((rooms: Room[]) => void) | undefined = undefined;
 let updateMessages: ((messages: Message[], replace: boolean) => void) | undefined = undefined;
@@ -40,6 +41,8 @@ export interface WorkletContextType {
   setInviteCallbacks: (callbacks: {
     onInviteGenerated?: (roomId: string, inviteCode: string) => void
   }) => void;
+  fileDownloads: any,
+  downloadFile: any
 }
 
 export const WorkletContext = createContext<WorkletContextType>(undefined as any);
@@ -49,13 +52,24 @@ export interface WorkletProviderProps {
 }
 
 export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) => {
-  const { updateUser, storeSeedPhrase, setUser } = useUser();
+  const { updateUser, storeSeedPhrase } = useUser();
   const [worklet, setWorklet] = useState<Worklet | null>(null);
   const [rpcClient, setRpcClient] = useState<any>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const [isBackendReady, setIsBackendReady] = useState(false);
+  const [fileDownloads, setFileDownloads] = useState<{
+    [key: string]: {
+      progress: number;
+      message: string;
+      preview: boolean;
+      data?: string;
+      mimeType?: string;
+      fileName?: string;
+    }
+  }>({});
+
   const reset = useCallback(() => {
     // Reset callback references
     updateRooms = undefined;
@@ -367,63 +381,30 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
               }
             }
 
+            // In your RPC handler, add these event handlers:
+            if (req.command === 'fileDownloadProgress') {
+              try {
+                const data = b4a.toString(req.data);
+                const parsedData = JSON.parse(data);
+                console.log('File download progress:', parsedData);
+
+                onFileDownloadProgress(parsedData);
+              } catch (e) {
+                console.error('Error handling fileDownloadProgress:', e);
+              }
+            }
 
             if (req.command === 'fileDownloaded') {
               try {
                 const data = b4a.toString(req.data);
                 const parsedData = JSON.parse(data);
-                console.log('File download response:', parsedData);
+                console.log('File downloaded:', parsedData.fileName);
 
-                if (parsedData.success) {
-                  // For mobile, we can save the file to the device's filesystem
-                  if (Platform.OS !== 'web') {
-                    const saveFile = async () => {
-                      try {
-                        // Convert base64 data to file
-                        const fileUri = FileSystem.documentDirectory + parsedData.fileName;
-                        await FileSystem.writeAsStringAsync(fileUri, parsedData.data, {
-                          encoding: FileSystem.EncodingType.Base64
-                        });
-
-                        // Show success message with options to view/share
-                        Alert.alert(
-                          'Download Complete',
-                          `File saved to: ${fileUri}`,
-                          [
-                            { text: 'OK' },
-                            {
-                              text: 'Share',
-                            }
-                          ]
-                        );
-                      } catch (err) {
-                        console.error('Error saving downloaded file:', err);
-                        Alert.alert('Download Error', 'Failed to save the file.');
-                      }
-                    };
-
-                    saveFile();
-                  } else {
-                    // For web, we can create a download link
-                    const blob = b64toBlob(parsedData.data, parsedData.mimeType);
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = parsedData.fileName;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                  }
-                } else {
-                  Alert.alert('Download Failed', parsedData.error || 'Could not download file.');
-                }
+                onFileDownloaded(parsedData);
               } catch (e) {
                 console.error('Error handling fileDownloaded:', e);
-                Alert.alert('Download Error', 'An error occurred processing the downloaded file.');
               }
             }
-
 
 
 
@@ -618,6 +599,156 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     return false
   }, [rpcClient]);
 
+
+  // Add this to your callbacks
+  const onFileDownloadProgress = (data: any) => {
+    const { attachmentId, progress, message, preview } = data;
+
+    if (!attachmentId) return;
+
+    // Update the download progress for this file
+    setFileDownloads(prev => ({
+      ...prev,
+      [attachmentId]: {
+        ...prev[attachmentId],
+        progress,
+        message,
+        preview
+      }
+    }));
+  };
+
+  const onFileDownloaded = (data: any) => {
+    const { success, error, attachmentId, data: fileData, mimeType, fileName, preview } = data;
+
+    if (!attachmentId) return;
+
+    if (success) {
+      // Update the file download with completed data
+      setFileDownloads(prev => ({
+        ...prev,
+        [attachmentId]: {
+          ...prev[attachmentId],
+          progress: 100,
+          message: 'Download complete',
+          data: fileData,
+          mimeType,
+          fileName,
+          preview
+        }
+      }));
+
+      // Handle the downloaded file based on platform
+      if (Platform.OS !== 'web') {
+        // For mobile, save the file to the filesystem
+        if (!preview) {
+          saveFileToDevice(fileData, fileName, mimeType);
+        }
+      } else {
+
+      }
+    } else {
+      // Update state with error
+      setFileDownloads(prev => ({
+        ...prev,
+        [attachmentId]: {
+          ...prev[attachmentId],
+          progress: 0,
+          message: error || 'Download failed',
+          error: true
+        }
+      }));
+
+      // Show error alert
+      Alert.alert('Download Failed', error || 'Failed to download file');
+    }
+  };
+
+  // Helper function to save file on mobile
+  const saveFileToDevice = async (base64Data, fileName, mimeType) => {
+    try {
+      if (Platform.OS === 'android') {
+        // First try using MediaLibrary for common media types
+        if (mimeType.startsWith('image/') || mimeType.startsWith('video/')) {
+          const { status } = await MediaLibrary.requestPermissionsAsync();
+          if (status === 'granted') {
+            // Save to temporary cache first
+            const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
+            await FileSystem.writeAsStringAsync(fileUri, base64Data, {
+              encoding: FileSystem.EncodingType.Base64
+            });
+
+            // Then save to media library
+            await MediaLibrary.saveToLibraryAsync(fileUri);
+            Alert.alert('Success', 'File saved to gallery');
+            return;
+          }
+        }
+
+        // For other file types or if gallery permission denied, use SAF
+        try {
+          // Get permission and directory uri
+          const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+
+          if (permissions.granted) {
+            // Save to cache first
+            const cacheFileUri = `${FileSystem.cacheDirectory}${fileName}`;
+            await FileSystem.writeAsStringAsync(cacheFileUri, base64Data, {
+              encoding: FileSystem.EncodingType.Base64
+            });
+
+            // Save file to selected directory
+            const destinationUri = await FileSystem.StorageAccessFramework.createFileAsync(
+              permissions.directoryUri,
+              fileName,
+              mimeType
+            );
+
+            // Copy from cache to destination
+            const fileContent = await FileSystem.readAsStringAsync(cacheFileUri, {
+              encoding: FileSystem.EncodingType.Base64
+            });
+
+            await FileSystem.StorageAccessFramework.writeAsStringAsync(
+              destinationUri,
+              fileContent,
+              { encoding: FileSystem.EncodingType.Base64 }
+            );
+
+            Alert.alert('Success', 'File saved successfully');
+            return;
+          }
+        } catch (safError) {
+          console.error('SAF error:', safError);
+        }
+      }
+
+      // For iOS or as fallback, use sharing
+      if (await Sharing.isAvailableAsync()) {
+        // Save to temp location
+        const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
+        await FileSystem.writeAsStringAsync(fileUri, base64Data, {
+          encoding: FileSystem.EncodingType.Base64
+        });
+
+        // Share the file
+        await Sharing.shareAsync(fileUri);
+      } else {
+        // Last resort - just save to cache
+        const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
+        await FileSystem.writeAsStringAsync(fileUri, base64Data, {
+          encoding: FileSystem.EncodingType.Base64
+        });
+
+        Alert.alert('File Saved', `File saved to app cache: ${fileName}`);
+      }
+    } catch (error) {
+      console.error('Error saving file:', error);
+      Alert.alert('Error', 'Failed to save file');
+    }
+  };
+
+
   const value = {
     worklet,
     isInitialized,
@@ -634,7 +765,36 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     setCallbacks,
     reinitializeBackend,
     onInviteGenerated,
-    setInviteCallbacks
+    setInviteCallbacks,
+    fileDownloads,
+    downloadFile: async (roomId: string, attachment: any, preview = false) => {
+      if (!rpcClient) return false;
+
+      try {
+        // Reset progress for this attachment
+        setFileDownloads(prev => ({
+          ...prev,
+          [attachment.blobId]: {
+            progress: 0,
+            message: 'Preparing download...',
+            preview
+          }
+        }));
+
+        const request = rpcClient.request('downloadFile');
+        await request.send(JSON.stringify({
+          roomId,
+          attachment,
+          requestProgress: true,
+          preview
+        }));
+
+        return true;
+      } catch (err) {
+        console.error('Error requesting file download:', err);
+        return false;
+      }
+    }
   };
 
   return (

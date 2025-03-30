@@ -221,6 +221,25 @@ const rpc = new RPC(IPC, (req, error) => {
     handleFileUpload(data);
   }
 
+  if (req.command === 'downloadFile') {
+    const data = b4a.toString(req.data);
+    handleFileDownload(data);
+  }
+
+  // Progress reporting handler for file downloads
+  if (req.command === 'fileDownloadProgress') {
+    try {
+      const data = b4a.toString(req.data);
+      const parsedData = JSON.parse(data);
+
+      // Forward the progress event to the client
+      const progressReq = rpc.request('fileDownloadProgress');
+      progressReq.send(JSON.stringify(parsedData));
+    } catch (e) {
+      console.error('Error handling download progress event:', e);
+    }
+  }
+
 
   if (req.command === 'loadMoreMessages') {
     const data = b4a.toString(req.data);
@@ -1517,6 +1536,127 @@ const uploadFileToRoom = async (fileInfo) => {
     return false;
   }
 };
+
+const handleFileDownload = async (requestData) => {
+  try {
+    const params = JSON.parse(requestData);
+    const { roomId, attachment, requestProgress = false, preview = false } = params;
+
+    if (!roomId || !attachment || !attachment.blobId) {
+      throw new Error('Invalid file download parameters');
+    }
+
+    // Get the room
+    const room = roomBases[roomId];
+    if (!room) {
+      throw new Error(`Room ${roomId} not found or not initialized`);
+    }
+
+    // Make sure room is ready
+    await room.ready();
+
+    // Set up a progress handler if requested
+    const onProgress = requestProgress ? (percent, message) => {
+      // Send progress update to client
+      const progressReq = rpc.request('fileDownloadProgress');
+      progressReq.send(JSON.stringify({
+        roomId,
+        attachmentId: attachment.blobId,
+        progress: percent,
+        message,
+        preview
+      }));
+    } : undefined;
+
+    // Get configPath for temp directory
+    const configPath = `${path}/downloads`;
+
+    // Use the downloadFile method to fetch the blob data
+    const fileData = await room.downloadFile(attachment, configPath, {
+      onProgress
+    });
+
+    if (!fileData) {
+      throw new Error('Failed to download file');
+    }
+
+    // Convert file data to base64 for transfer
+    const base64Data = b4a.toString(fileData, 'base64');
+
+    // Send the complete file data to the client
+    // For images in preview mode, we might want to resize them first to save bandwidth
+    const response = {
+      success: true,
+      roomId,
+      attachmentId: attachment.blobId,
+      fileName: attachment.name,
+      data: base64Data,
+      mimeType: attachment.type || getMimeType(attachment.name),
+      preview
+    };
+
+    // Send the file data
+    const completeReq = rpc.request('fileDownloaded');
+    completeReq.send(JSON.stringify(response));
+
+    return { success: true };
+  } catch (error) {
+    console.error('Error handling file download:', error);
+
+    // Notify client of error
+    const errorReq = rpc.request('fileDownloaded');
+    errorReq.send(JSON.stringify({
+      success: false,
+      error: error.message || 'Unknown error during file download'
+    }));
+
+    return { success: false, error: error.message };
+  }
+};
+
+// Helper to determine MIME type from filename
+const getMimeType = (filename) => {
+  const ext = filename.split('.').pop().toLowerCase();
+  const mimeTypes = {
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'gif': 'image/gif',
+    'pdf': 'application/pdf',
+    'doc': 'application/msword',
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'xls': 'application/vnd.ms-excel',
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'ppt': 'application/vnd.ms-powerpoint',
+    'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'mp3': 'audio/mpeg',
+    'wav': 'audio/wav',
+    'mp4': 'video/mp4',
+    'mov': 'video/quicktime',
+    'zip': 'application/zip',
+    'txt': 'text/plain',
+    'html': 'text/html',
+    'css': 'text/css',
+    'js': 'application/javascript'
+  };
+
+  return mimeTypes[ext] || 'application/octet-stream';
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 const joinRoomByInvite = async (params) => {
   const { inviteCode } = params;
 

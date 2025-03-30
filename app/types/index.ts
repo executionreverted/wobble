@@ -45,7 +45,7 @@ export type ChatContextType = {
   selectRoom: (room: Room) => Promise<void>;
   leaveRoom: () => void;
   sendMessage: (text: string) => Promise<void>;
-  refreshRooms: () => Promise<void>;
+  refreshRooms: () => Promise<any>;
   createRoom: (name: string, description: string) => Promise<{ success: boolean, roomId: string }>;
   loadMoreMessages: () => Promise<boolean>;
   setCurrentRoom?: any

@@ -2,11 +2,6 @@ import React, { createContext, useState, useEffect, useCallback, useRef } from '
 import { Room, Message, User, ChatContextType } from '../types';
 import useUser from '../hooks/useUser';
 import useWorklet from '../hooks/useWorklet';
-
-interface MessagesByRoom {
-  [roomId: string]: Message[];
-}
-
 // Default context values
 const defaultChatContext: ChatContextType = {
   rooms: [],
@@ -18,7 +13,7 @@ const defaultChatContext: ChatContextType = {
   selectRoom: async () => { },
   leaveRoom: () => { },
   sendMessage: async () => { },
-  refreshRooms: async () => { },
+  refreshRooms: async () => (true as any),
   createRoom: async () => { return { success: false, roomId: '' } },
   loadMoreMessages: async () => false,
   reset: () => { }
