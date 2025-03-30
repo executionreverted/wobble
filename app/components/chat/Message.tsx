@@ -1,4 +1,4 @@
-// components/chat/EnhancedMessage.tsx
+// Fixed components/chat/Message.tsx
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { COLORS } from '../../utils/constants';
@@ -6,7 +6,7 @@ import { formatTimestamp } from '../../utils/helpers';
 import { EnhancedFileAttachment, EnhancedImageAttachment } from './FileAttachments';
 
 // Message component to render each chat message
-const EnhancedMessage = ({ message, isOwnMessage, roomId }) => {
+const EnhancedMessage = ({ handleAttachmentPress, message, isOwnMessage, roomId }) => {
   if (!message) return null;
 
   // Parse attachments if present
@@ -17,11 +17,8 @@ const EnhancedMessage = ({ message, isOwnMessage, roomId }) => {
   let attachments = [];
   if (hasAttachments) {
     try {
-      if (typeof message.attachments === 'string') {
-        attachments = JSON.parse(message.attachments);
-      } else if (Array.isArray(message.attachments)) {
-        attachments = message.attachments;
-      }
+
+      attachments = JSON.parse(message.attachments);
       // Ensure attachments is an array
       if (!Array.isArray(attachments)) {
         console.warn('Attachments parsed to non-array type:', typeof attachments);
@@ -32,6 +29,8 @@ const EnhancedMessage = ({ message, isOwnMessage, roomId }) => {
       attachments = [];
     }
   }
+
+  console.log({ attachments, hasAttachments })
 
   return (
     <View style={[
@@ -65,11 +64,13 @@ const EnhancedMessage = ({ message, isOwnMessage, roomId }) => {
 
               return isImage ?
                 <EnhancedImageAttachment
+                  handleAttachmentPress={handleAttachmentPress}
                   key={`img-${index}-${attachment.blobId || index}`}
                   attachment={attachment}
                   roomId={roomId}
                 /> :
                 <EnhancedFileAttachment
+                  handleAttachmentPress={handleAttachmentPress}
                   key={`file-${index}-${attachment.blobId || index}`}
                   attachment={attachment}
                   roomId={roomId}

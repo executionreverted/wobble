@@ -1,4 +1,4 @@
-// components/chat/EnhancedFileAttachments.tsx
+// Updated components/chat/FileAttachments.tsx
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform, Image } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -9,7 +9,7 @@ import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
 
 // File attachment component with download progress
-export const EnhancedFileAttachment = ({ attachment, roomId }: { attachment: any; roomId: string }) => {
+export const EnhancedFileAttachment = ({ handleAttachmentPress, attachment, roomId }: { attachment: any; roomId: string }) => {
   const { fileDownloads, downloadFile } = useWorklet();
   const [isDownloading, setIsDownloading] = useState(false);
 
@@ -91,7 +91,10 @@ export const EnhancedFileAttachment = ({ attachment, roomId }: { attachment: any
         />
       </View>
       <View style={styles.attachmentDetails}>
-        <Text style={styles.attachmentName} numberOfLines={1}>{attachment.name}</Text>
+
+        <TouchableOpacity>
+          <Text onPress={handleAttachmentPress} style={styles.attachmentName} numberOfLines={1}>{attachment.name}</Text>
+        </TouchableOpacity>
         <Text style={styles.attachmentSize}>{formatFileSize(attachment.size || 0)}</Text>
 
         {downloadStatus && downloadStatus.progress > 0 && !isComplete && (
@@ -122,7 +125,7 @@ export const EnhancedFileAttachment = ({ attachment, roomId }: { attachment: any
 };
 
 // Enhanced image attachment with preview functionality
-export const EnhancedImageAttachment = ({ attachment, roomId }: { attachment: any; roomId: string }) => {
+export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roomId }: { attachment: any; roomId: string }) => {
   const { fileDownloads, downloadFile } = useWorklet();
   const [isDownloading, setIsDownloading] = useState(false);
 
@@ -138,10 +141,10 @@ export const EnhancedImageAttachment = ({ attachment, roomId }: { attachment: an
       setIsDownloading(false);
     }
 
-    // // Auto-download preview if not already downloading or downloaded
-    // if (!downloadStatus && !isDownloading && !hasPreview) {
-    //   downloadPreview();
-    // }
+    // Auto-download preview if attachment is an image and we don't have a preview yet
+    if (!downloadStatus && !isDownloading && !hasPreview && isImageFile(attachment.name)) {
+      downloadPreview();
+    }
   }, [downloadStatus, attachment]);
 
   const downloadPreview = async () => {
@@ -268,7 +271,9 @@ export const EnhancedImageAttachment = ({ attachment, roomId }: { attachment: an
         ) : (
           <>
             <MaterialIcons name="image" size={48} color={COLORS.primary} />
-            <Text style={styles.attachmentName} numberOfLines={1}>{attachment.name}</Text>
+            <TouchableOpacity onPress={handleAttachmentPress}>
+              <Text style={styles.attachmentName} numberOfLines={1}>{attachment.name}</Text>
+            </TouchableOpacity>
           </>
         )}
 
@@ -294,6 +299,12 @@ export const EnhancedImageAttachment = ({ attachment, roomId }: { attachment: an
       </View>
     </TouchableOpacity>
   );
+};
+
+// Helper function to check if file is an image
+const isImageFile = (fileName: string) => {
+  const ext = fileName?.split('.')?.pop()?.toLowerCase() || '';
+  return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext);
 };
 
 // Helper function to get icon based on file extension

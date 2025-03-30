@@ -278,7 +278,7 @@ const EnhancedChatRoom = () => {
 
   // Function to handle attachment press/download
   const handleAttachmentPress = async (attachment: any) => {
-
+    console.log(attachment)
     if (!currentRoom || !currentRoom.id) return;
     if (!attachment || !attachment.blobId) {
       Alert.alert('Error', 'Invalid attachment data');
@@ -338,10 +338,12 @@ const EnhancedChatRoom = () => {
 
     // Check if the message is from the current user
     const isOwnMessage = user && user.name && item.sender === user.name;
+    const attachment = item.hasAttachments ? JSON.parse(item.attachments) : []
 
     // Use our enhanced message component with proper room ID
     return (
       <Message
+        handleAttachmentPress={handleAttachmentPress}
         message={item}
         isOwnMessage={isOwnMessage as boolean}
         roomId={currentRoom?.id as any}
@@ -387,6 +389,8 @@ const EnhancedChatRoom = () => {
       </View>
     );
   };
+
+  console.log({ messages })
 
   return (
     <KeyboardAvoidingView
