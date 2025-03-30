@@ -10,6 +10,7 @@ import useUser from '../hooks/useUser';
 import { Room, Message } from '../types';
 import resetRegistry from './resetSystem';
 import * as MediaLibrary from "expo-media-library"
+import { createStableBlobId } from '../utils/helpers';
 // Use variables instead of state for callbacks
 let updateRooms: ((rooms: Room[]) => void) | undefined = undefined;
 let updateMessages: ((messages: Message[], replace: boolean) => void) | undefined = undefined;
@@ -41,8 +42,18 @@ export interface WorkletContextType {
   setInviteCallbacks: (callbacks: {
     onInviteGenerated?: (roomId: string, inviteCode: string) => void
   }) => void;
-  fileDownloads: any,
-  downloadFile: any
+  fileDownloads: {
+    [key: string]: {
+      progress: number;
+      message: string;
+      preview: boolean;
+      data?: string;
+      mimeType?: string;
+      fileName?: string;
+    }
+  };
+
+  downloadFile: (roomId: string, attachment: any, preview?: boolean, attachmentKey?: string) => Promise<boolean>;
 }
 
 export const WorkletContext = createContext<WorkletContextType>(undefined as any);
@@ -600,17 +611,19 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
   }, [rpcClient]);
 
 
-  // Add this to your callbacks
   const onFileDownloadProgress = (data: any) => {
-    const { attachmentId, progress, message, preview } = data;
+    const { attachmentId, progress, message, preview, attachmentKey } = data;
 
-    if (!attachmentId) return;
+    // Use the attachmentKey if provided, otherwise fall back to just the attachmentId
+    const downloadKey = attachmentKey || attachmentId;
+
+    if (!downloadKey) return;
 
     // Update the download progress for this file
     setFileDownloads(prev => ({
       ...prev,
-      [attachmentId]: {
-        ...prev[attachmentId],
+      [downloadKey]: {
+        ...prev[downloadKey],
         progress,
         message,
         preview
@@ -619,50 +632,70 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
   };
 
   const onFileDownloaded = (data: any) => {
-    const { success, error, attachmentId, data: fileData, mimeType, fileName, preview } = data;
+    try {
+      const { success, error, attachmentId, data: fileData, mimeType, fileName, preview, roomId, attachmentKey } = data;
+      console.log(attachmentId, attachmentKey)
+      // Generate a truly unique key for this specific download
+      // This ensures different attachments don't overwrite each other
+      const processedAttachmentId = createStableBlobId(attachmentId);
+      const uniqueDownloadKey = attachmentKey ||
+        (roomId && processedAttachmentId ?
+          `${roomId}_${processedAttachmentId}` :
+          `download_${Date.now()}`);
 
-    if (!attachmentId) return;
+      if (!uniqueDownloadKey) {
+        console.error('Missing attachment identifier in downloaded file data');
+        return;
+      }
 
-    if (success) {
-      // Update the file download with completed data
-      setFileDownloads(prev => ({
-        ...prev,
-        [attachmentId]: {
-          ...prev[attachmentId],
-          progress: 100,
-          message: 'Download complete',
-          data: fileData,
-          mimeType,
-          fileName,
-          preview
-        }
-      }));
+      console.log(`File download complete for ${uniqueDownloadKey}, preview: ${preview}`);
 
-      // Handle the downloaded file based on platform
-      if (Platform.OS !== 'web') {
-        // For mobile, save the file to the filesystem
-        if (!preview) {
+      if (success) {
+        // Update the file download with completed data
+        setFileDownloads(prev => {
+          // Create a new state object to ensure React detects the change
+          const newState = { ...prev };
+
+          // Update the specific download entry
+          newState[uniqueDownloadKey] = {
+            ...prev[uniqueDownloadKey],
+            progress: 100,
+            message: 'Download complete',
+            data: fileData,
+            mimeType,
+            fileName,
+            preview,
+            timestamp: Date.now() // Add timestamp to ensure updates are detected
+          };
+
+          return newState;
+        });
+
+        // Handle the downloaded file based on platform
+        if (Platform.OS !== 'web' && !preview) {
+          // For mobile, save the file to the filesystem
           saveFileToDevice(fileData, fileName, mimeType);
         }
       } else {
+        // Update state with error
+        setFileDownloads(prev => ({
+          ...prev,
+          [uniqueDownloadKey]: {
+            ...prev[uniqueDownloadKey],
+            progress: 0,
+            message: error || 'Download failed',
+            error: true
+          }
+        }));
 
+        // Show error alert
+        Alert.alert('Download Failed', error || 'Failed to download file');
       }
-    } else {
-      // Update state with error
-      setFileDownloads(prev => ({
-        ...prev,
-        [attachmentId]: {
-          ...prev[attachmentId],
-          progress: 0,
-          message: error || 'Download failed',
-          error: true
-        }
-      }));
-
-      // Show error alert
-      Alert.alert('Download Failed', error || 'Failed to download file');
+    } catch (error) {
+      console.error('Error processing downloaded file:', error);
     }
   };
+
 
   // Helper function to save file on mobile
   const saveFileToDevice = async (base64Data, fileName, mimeType) => {
@@ -749,6 +782,10 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
   };
 
 
+
+
+
+
   const value = {
     worklet,
     isInitialized,
@@ -767,26 +804,31 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     onInviteGenerated,
     setInviteCallbacks,
     fileDownloads,
-    downloadFile: async (roomId: string, attachment: any, preview = false) => {
+    downloadFile: async (roomId: string, attachment: any, preview = false, attachmentKey?: string) => {
       if (!rpcClient) return false;
 
       try {
-        // Reset progress for this attachment
+        // Generate a unique key for this download if not provided
+        const downloadKey = attachmentKey || `${roomId}_${attachment.blobId}`;
+
+        // Reset progress for this attachment using the unique key
         setFileDownloads(prev => ({
           ...prev,
-          [attachment.blobId]: {
+          [downloadKey]: {
             progress: 0,
             message: 'Preparing download...',
             preview
           }
         }));
 
+        // Include the attachmentKey in the request
         const request = rpcClient.request('downloadFile');
         await request.send(JSON.stringify({
           roomId,
           attachment,
           requestProgress: true,
-          preview
+          preview,
+          attachmentKey: downloadKey
         }));
 
         return true;

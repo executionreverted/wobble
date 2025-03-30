@@ -34,7 +34,6 @@ const EnhancedMessage = ({ handleAttachmentPress, message, isOwnMessage, roomId 
     }
   }
 
-  console.log({ attachments, hasAttachments })
 
   return (
     <View style={[
@@ -55,7 +54,7 @@ const EnhancedMessage = ({ handleAttachmentPress, message, isOwnMessage, roomId 
         )}
 
         {/* Render attachments if present */}
-        {hasAttachments && Array.isArray(attachments) && attachments.length > 0 && (
+        {hasAttachments && attachments.length > 0 && (
           <View style={styles.attachmentsContainer}>
             {attachments.map((attachment, index) => {
               if (!attachment || !attachment.name) {
@@ -63,19 +62,22 @@ const EnhancedMessage = ({ handleAttachmentPress, message, isOwnMessage, roomId 
                 return null;
               }
 
+              // Generate a unique ID for this attachment
+              const attachmentId = attachment.blobId || `attachment-${message.id}-${index}`;
+
               const fileExt = (attachment.name || '').split('.').pop().toLowerCase();
               const isImage = ['jpg', 'jpeg', 'png', 'gif'].includes(fileExt);
 
               return isImage ?
                 <EnhancedImageAttachment
-                  handleAttachmentPress={handleAttachmentPress}
-                  key={`img-${index}-${attachment.blobId || index}`}
+                  key={`img-${attachmentId}`}
+                  handleAttachmentPress={() => handleAttachmentPress(attachment)}
                   attachment={attachment}
                   roomId={roomId}
                 /> :
                 <EnhancedFileAttachment
-                  handleAttachmentPress={handleAttachmentPress}
-                  key={`file-${index}-${attachment.blobId || index}`}
+                  key={`file-${attachmentId}`}
+                  handleAttachmentPress={() => handleAttachmentPress(attachment)}
                   attachment={attachment}
                   roomId={roomId}
                 />;
@@ -90,8 +92,7 @@ const EnhancedMessage = ({ handleAttachmentPress, message, isOwnMessage, roomId 
       ]}>
         {formatTimestamp(message.timestamp || Date.now())}
       </Text>
-    </View>
-  );
+    </View>);
 };
 
 // System message component

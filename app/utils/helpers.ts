@@ -102,5 +102,43 @@ export const getUserStatusText = (user: User): string => {
   return user.isOnline ? 'Online' : 'Offline';
 };
 
+export const createStableBlobId = (blobRef: any) => {
+  if (!blobRef) return 'unknown-blob';
+
+  if (typeof blobRef === 'string') return blobRef;
+
+  if (typeof blobRef === 'object') {
+    // For hyperblobs object with block info
+    if (blobRef.blockLength && blobRef.blockOffset && blobRef.byteLength) {
+      return `blob-${blobRef.byteOffset}-${blobRef.byteLength}`;
+    }
+
+    // Try to use any numeric properties to create a stable ID
+    const numericProps = Object.entries(blobRef)
+      .filter(([_, val]) => typeof val === 'number')
+      .map(([key, val]) => `${key}-${val}`);
+
+    if (numericProps.length > 0) {
+      return `blob-${numericProps.join('-')}`;
+    }
+
+    // Last resort: stable hash from stringified object
+    try {
+      const str = JSON.stringify(blobRef);
+      let hash = 0;
+      for (let i = 0; i < str.length; i++) {
+        hash = ((hash << 5) - hash) + str.charCodeAt(i);
+        hash |= 0; // Convert to 32bit integer
+      }
+      return `blob-hash-${Math.abs(hash)}`;
+    } catch (e) {
+      return `blob-${Date.now()}-${Math.random().toString(36).substring(2)}`;
+    }
+  }
+
+  // Fallback for any other type
+  return `blob-${Date.now()}-${Math.random().toString(36).substring(2)}`;
+};
+
 
 export default {}

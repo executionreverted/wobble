@@ -1,4 +1,3 @@
-// Updated components/chat/FileAttachments.tsx
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform, Image } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -7,14 +6,22 @@ import useWorklet from '../../hooks/useWorklet';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
+import { createStableBlobId } from '@/app/utils/helpers';
 
 // File attachment component with download progress
 export const EnhancedFileAttachment = ({ handleAttachmentPress, attachment, roomId }: { attachment: any; roomId: string }) => {
   const { fileDownloads, downloadFile } = useWorklet();
   const [isDownloading, setIsDownloading] = useState(false);
 
-  // Get download status for this attachment
-  const downloadStatus = fileDownloads[attachment.blobId];
+  // Create a unique key for this attachment
+  const blobId = createStableBlobId(attachment.blobId);
+  const attachmentKey = `${roomId}_${blobId}`;
+
+
+
+
+  // Get download status for this attachment using the unique key
+  const downloadStatus = fileDownloads[attachmentKey];
 
   useEffect(() => {
     // Update downloading state based on progress
@@ -40,7 +47,7 @@ export const EnhancedFileAttachment = ({ handleAttachmentPress, attachment, room
           text: 'Download',
           onPress: async () => {
             setIsDownloading(true);
-            await downloadFile(roomId, attachment, false);
+            await downloadFile(roomId, attachment, false, attachmentKey);
           }
         }
       ]
@@ -125,13 +132,28 @@ export const EnhancedFileAttachment = ({ handleAttachmentPress, attachment, room
 };
 
 // Enhanced image attachment with preview functionality
+
 export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roomId }: { attachment: any; roomId: string }) => {
   const { fileDownloads, downloadFile } = useWorklet();
   const [isDownloading, setIsDownloading] = useState(false);
+  const [localPreviewUri, setLocalPreviewUri] = useState<string | null>(null);
 
-  // Get download status for this attachment
-  const downloadStatus = fileDownloads[attachment.blobId];
-  const hasPreview = downloadStatus?.data && downloadStatus?.preview;
+  //
+  const blobId = createStableBlobId(attachment.blobId);
+  const attachmentKey = `${roomId}_${blobId}`;
+
+  // Get download status for this attachment using the unique key
+  const downloadStatus = fileDownloads[attachmentKey];
+  const hasPreview = Boolean(downloadStatus?.data && downloadStatus?.preview);
+  // When download status changes, update the local preview URI to force re-render
+  useEffect(() => {
+    if (downloadStatus?.data) {
+      const timestamp = downloadStatus.timestamp || Date.now();
+      setLocalPreviewUri(`data:image/jpeg;base64,${downloadStatus.data}?t=${timestamp}`);
+    } else {
+      setLocalPreviewUri(null);
+    }
+  }, [downloadStatus?.preview]);
 
   useEffect(() => {
     // Update downloading state based on progress
@@ -142,7 +164,6 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
     }
 
     // Auto-download preview if attachment is an image and we don't have a preview yet
-    console.log(!downloadStatus, !isDownloading, !hasPreview, isImageFile(attachment.name))
     if (!downloadStatus && !isDownloading && !hasPreview && isImageFile(attachment.name)) {
       downloadPreview();
     }
@@ -151,8 +172,10 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
   const downloadPreview = async () => {
     if (!roomId || !attachment || !attachment.blobId) return;
 
+    console.log(`Downloading preview for ${attachment.name} with key ${attachmentKey}`);
     setIsDownloading(true);
-    await downloadFile(roomId, attachment, true); // true indicates preview mode
+    // Pass the attachmentKey as the 4th parameter to downloadFile
+    await downloadFile(roomId, attachment, true, attachmentKey); // true indicates preview mode
   };
 
   const handleFullDownload = async () => {
@@ -171,7 +194,7 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
             text: 'Download',
             onPress: async () => {
               setIsDownloading(true);
-              await downloadFile(roomId, attachment, false); // false for full quality
+              await downloadFile(roomId, attachment, false, attachmentKey); // false for full quality
             }
           }
         ]
@@ -229,19 +252,18 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
     }
   };
 
-  // Helper for converting base64 to blob
-  // Add this helper function for base64 conversion on web
+  // Helper for converting base64 to blob (keep your existing implementation)
   const atob = (data: string): string => {
+    // Your existing implementation
     if (Platform.OS === 'web') {
       return window.atob(data);
     } else {
-      // Fallback for non-web platforms if needed
       return data;
     }
   };
 
-  // Replace the b64toBlob function with this improved version
   const b64toBlob = (base64: string, mimeType = '') => {
+    // Your existing implementation
     if (Platform.OS !== 'web') return null;
 
     try {
@@ -274,16 +296,18 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
       disabled={isDownloading}
     >
       <View style={styles.imageAttachmentPlaceholder}>
-        {hasPreview ? (
+        {localPreviewUri ? (
           <Image
-            source={{ uri: `data:image/jpeg;base64,${downloadStatus.data}` }}
+            source={{ uri: localPreviewUri }}
             style={styles.imagePreview}
             resizeMode="contain"
+            // Add a key to force re-render when the image changes
+            key={`preview-${attachmentKey}-${downloadStatus?.timestamp || Date.now()}`}
           />
         ) : (
           <>
             <MaterialIcons name="image" size={48} color={COLORS.primary} />
-            <TouchableOpacity onPress={handleAttachmentPress}>
+            <TouchableOpacity onPress={() => handleAttachmentPress && handleAttachmentPress(attachment)}>
               <Text style={styles.attachmentName} numberOfLines={1}>{attachment.name}</Text>
             </TouchableOpacity>
           </>

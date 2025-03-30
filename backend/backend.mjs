@@ -221,18 +221,12 @@ const rpc = new RPC(IPC, (req, error) => {
     handleFileUpload(data);
   }
 
-  if (req.command === 'downloadFile') {
-    const data = b4a.toString(req.data);
-    handleFileDownload(data);
-  }
-
-  // Progress reporting handler for file downloads
   if (req.command === 'fileDownloadProgress') {
     try {
       const data = b4a.toString(req.data);
       const parsedData = JSON.parse(data);
 
-      // Forward the progress event to the client
+      // Forward the progress event to the client, including attachmentKey if present
       const progressReq = rpc.request('fileDownloadProgress');
       progressReq.send(JSON.stringify(parsedData));
     } catch (e) {
@@ -240,6 +234,16 @@ const rpc = new RPC(IPC, (req, error) => {
     }
   }
 
+  // File download handler
+  if (req.command === 'downloadFile') {
+    try {
+      const data = b4a.toString(req.data);
+      const parsedData = JSON.parse(data);
+      handleFileDownload(data);
+    } catch (e) {
+      console.error('Error handling downloadFile command:', e);
+    }
+  }
 
   if (req.command === 'loadMoreMessages') {
     const data = b4a.toString(req.data);
@@ -1540,13 +1544,15 @@ const uploadFileToRoom = async (fileInfo) => {
 const handleFileDownload = async (requestData) => {
   try {
     const params = JSON.parse(requestData);
-    const { roomId, attachment, requestProgress = false, preview = false } = params;
+    const { roomId, attachment, requestProgress = false, preview = false, attachmentKey } = params;
 
     if (!roomId || !attachment || !attachment.blobId) {
       throw new Error('Invalid file download parameters');
     }
 
-    // Get the room
+    // Create a unique key for this download
+    const blobId = createStableBlobId(attachment.blobId);
+    const downloadKey = attachmentKey || `${roomId}_${blobId}`;    // Get the room
     const room = roomBases[roomId];
     if (!room) {
       throw new Error(`Room ${roomId} not found or not initialized`);
@@ -1564,7 +1570,8 @@ const handleFileDownload = async (requestData) => {
         attachmentId: attachment.blobId,
         progress: percent,
         message,
-        preview
+        preview,
+        attachmentKey: downloadKey // Include the attachment key
       }));
     } : undefined;
 
@@ -1592,7 +1599,8 @@ const handleFileDownload = async (requestData) => {
       fileName: attachment.name,
       data: base64Data,
       mimeType: attachment.type || getMimeType(attachment.name),
-      preview
+      preview,
+      attachmentKey: downloadKey // Include the attachment key
     };
 
     // Send the file data
@@ -1603,11 +1611,21 @@ const handleFileDownload = async (requestData) => {
   } catch (error) {
     console.error('Error handling file download:', error);
 
+    // Extract attachment key if available
+    let attachmentKey;
+    try {
+      const params = JSON.parse(requestData);
+      attachmentKey = params.attachmentKey || (params.attachment?.blobId);
+    } catch (e) {
+      attachmentKey = null;
+    }
+
     // Notify client of error
     const errorReq = rpc.request('fileDownloaded');
     errorReq.send(JSON.stringify({
       success: false,
-      error: error.message || 'Unknown error during file download'
+      error: error.message || 'Unknown error during file download',
+      attachmentKey // Include the attachment key for error handling
     }));
 
     return { success: false, error: error.message };
