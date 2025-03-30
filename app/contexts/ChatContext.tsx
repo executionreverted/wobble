@@ -12,6 +12,7 @@ const defaultChatContext: ChatContextType = {
   rooms: [],
   currentRoom: null,
   messages: [],
+  messagesByRoom: {}, // Add messagesByRoom to the default context
   onlineUsers: [],
   isLoading: false,
   selectRoom: async () => { },
@@ -439,6 +440,19 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     }
   };
 
+  // Reset function for the provider
+  const reset = useCallback(() => {
+    setRooms([]);
+    setCurrentRoom(null);
+    setMessagesByRoom({});
+    setOnlineUsers([]);
+    setHasMoreMessagesByRoom({});
+    setIsLoadingByRoom({});
+    setIsLoading(false);
+    initializedRooms.current.clear();
+    console.log('ChatContext reset complete');
+  }, []);
+
   // Append current room's loading state to messages
   const messagesWithLoadingState = getCurrentMessages();
   const isCurrentRoomLoading = currentRoom ? (isLoadingByRoom[currentRoom.id] || false) : false;
@@ -449,14 +463,17 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         rooms,
         currentRoom,
         messages: messagesWithLoadingState,
+        messagesByRoom, // Expose messagesByRoom to components
         onlineUsers,
         isLoading: isCurrentRoomLoading || isLoading,
         selectRoom,
         leaveRoom,
         sendMessage,
-        refreshRooms: refreshRooms as any,
+        refreshRooms,
         createRoom,
         loadMoreMessages,
+        reset,
+        // Include additional properties for component access
         setCurrentRoom,
         setMessagesByRoom,
         setOnlineUsers,

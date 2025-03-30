@@ -1,26 +1,55 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Alert } from 'react-native';
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TouchableOpacity,
+  TextInput,
+  Alert,
+  ActivityIndicator
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useChat } from '../../hooks/useChat';
-import { Room } from '../../types';
+import { Room, Message } from '../../types';
 import { COLORS } from '../../utils/constants';
-import { filterRooms } from '../../utils/helpers';
+import { filterRooms, formatTimestamp } from '../../utils/helpers';
 import CreateRoomModal from './CreateRoomModal';
 import JoinRoomModal from './JoinRoomModal';
 import useWorklet from '../../hooks/useWorklet';
 
+// Helper function to truncate message text
+const truncateMessage = (text: string, maxLength: number = 30): string => {
+  if (!text) return '';
+  return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+};
+
 const RoomListScreen = () => {
-  const { rooms, selectRoom, refreshRooms, createRoom } = useChat();
+  const { rooms, messagesByRoom, selectRoom, refreshRooms, createRoom } = useChat();
   const { rpcClient, setCallbacks } = useWorklet();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredRooms, setFilteredRooms] = useState<Room[]>(rooms);
+  const [filteredRooms, setFilteredRooms] = useState<Room[]>([]);
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [joinModalVisible, setJoinModalVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+
+  // Sort rooms by most recent message
+  const sortedRooms = useMemo(() => {
+    return [...rooms].sort((a, b) => {
+      const aMessages = messagesByRoom[a.id] || [];
+      const bMessages = messagesByRoom[b.id] || [];
+
+      const aLatestTime = aMessages.length > 0 ? aMessages[0]?.timestamp || 0 : (a.createdAt || 0);
+      const bLatestTime = bMessages.length > 0 ? bMessages[0]?.timestamp || 0 : (b.createdAt || 0);
+
+      // Sort in descending order (newest first)
+      return bLatestTime - aLatestTime;
+    });
+  }, [rooms, messagesByRoom]);
 
   useEffect(() => {
     // Load rooms when component mounts
@@ -40,10 +69,10 @@ const RoomListScreen = () => {
     };
   }, []);
 
-  // Filter rooms when search query or rooms list changes
+  // Filter rooms when search query or sorted rooms list changes
   useEffect(() => {
-    setFilteredRooms(filterRooms(rooms, searchQuery));
-  }, [rooms, searchQuery]);
+    setFilteredRooms(filterRooms(sortedRooms, searchQuery));
+  }, [sortedRooms, searchQuery]);
 
   const handleSelectRoom = async (room: Room) => {
     await selectRoom(room);
@@ -88,18 +117,43 @@ const RoomListScreen = () => {
     setSearchQuery(text);
   };
 
-  const renderRoomItem = ({ item }: { item: Room }) => (
-    <TouchableOpacity style={styles.roomItem} onPress={() => handleSelectRoom(item)}>
-      <View style={styles.roomIcon}>
-        <Text style={styles.roomInitial}>{item.name.charAt(0).toUpperCase()}</Text>
-      </View>
-      <View style={styles.roomInfo}>
-        <Text style={styles.roomName}>#{item.name}</Text>
-        <Text style={styles.roomDescription}>{item.description}</Text>
-      </View>
-      <MaterialIcons name="chevron-right" size={24} color={COLORS.textMuted} />
-    </TouchableOpacity>
-  );
+  // Get the latest message for a room
+  const getLatestMessage = (roomId: string): Message | null => {
+    const messages = messagesByRoom[roomId] || [];
+    return messages.length > 0 ? messages[0] : null;
+  };
+
+  const renderRoomItem = ({ item }: { item: Room }) => {
+    const latestMessage = getLatestMessage(item.id);
+
+    return (
+      <TouchableOpacity style={styles.roomItem} onPress={() => handleSelectRoom(item)}>
+        <View style={styles.roomIcon}>
+          <Text style={styles.roomInitial}>{item.name.charAt(0).toUpperCase()}</Text>
+        </View>
+        <View style={styles.roomInfo}>
+          <Text style={styles.roomName}>#{item.name}</Text>
+
+          {latestMessage ? (
+            <View style={styles.messagePreviewContainer}>
+              <Text style={styles.messageSender}>
+                {latestMessage.system ? 'System' : latestMessage.sender}:
+              </Text>
+              <Text style={styles.messagePreview} numberOfLines={1}>
+                {truncateMessage(latestMessage.content)}
+              </Text>
+              <Text style={styles.messageTime}>
+                {formatTimestamp(latestMessage.timestamp)}
+              </Text>
+            </View>
+          ) : (
+            <Text style={styles.roomDescription}>{item.description}</Text>
+          )}
+        </View>
+        <MaterialIcons name="chevron-right" size={24} color={COLORS.textMuted} />
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
@@ -128,6 +182,7 @@ const RoomListScreen = () => {
 
       {isLoading ? (
         <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
           <Text style={styles.loadingText}>Loading rooms...</Text>
         </View>
       ) : filteredRooms.length > 0 ? (
@@ -270,6 +325,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textSecondary,
   },
+  messagePreviewContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+  },
+  messageSender: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: COLORS.textSecondary,
+    marginRight: 4,
+  },
+  messagePreview: {
+    fontSize: 14,
+    color: COLORS.textMuted,
+    flex: 1,
+  },
+  messageTime: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginLeft: 4,
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -278,6 +354,7 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 16,
     color: COLORS.textSecondary,
+    marginTop: 12,
   },
   emptyState: {
     flex: 1,

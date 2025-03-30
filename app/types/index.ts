@@ -38,7 +38,8 @@ export type AuthContextType = {
 export type ChatContextType = {
   rooms: Room[];
   currentRoom: Room | null;
-  messages: Message[]; // This is now a computed value from messagesByRoom
+  messages: Message[]; // Current room's messages
+  messagesByRoom: { [roomId: string]: Message[] }; // Messages organized by room ID
   onlineUsers: User[];
   isLoading?: boolean; // Loading state for the current room
   selectRoom: (room: Room) => Promise<void>;
