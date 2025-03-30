@@ -17,6 +17,8 @@ import { generateUUID } from './utils.mjs'
 //     ? '/data/data/to.holepunch.bare.expo/autopass-example'
 //     : './tmp/autopass-example/'
 
+let roomBlobStores = {};
+let roomBlobCores = {};
 const getDataPath = () => {
   // Get instance identifier - can be passed as a launch parameter or from env
   const instanceId = Math.ceil(Math.random() * 100)
@@ -31,8 +33,8 @@ const getDataPath = () => {
 };
 
 const path = getDataPath();
-const userBasePath = path + 'userbase/'
-const roomBasePath = path + 'roombase/'
+const userBasePath = path + '/userbase/'
+const roomBasePath = path + '/roombase/'
 let trying;
 // Global variables
 let userCorestore;
@@ -298,48 +300,100 @@ const checkExistingUser = async () => {
   try {
     // Check if user directory exists
     if (!fs.existsSync(userBasePath)) {
-      const req = rpc.request('userCheckResult')
-      req.send(JSON.stringify({ exists: false }))
-      return
+      console.log('User directory does not exist, sending No User response');
+      const req = rpc.request('userCheckResult');
+      req.send(JSON.stringify({ exists: false }));
+      return;
+    }
+
+    // Check if directory is empty
+    const files = fs.readdirSync(userBasePath);
+    if (files.length === 0) {
+      console.log('User directory exists but is empty, sending No User response');
+      const req = rpc.request('userCheckResult');
+      req.send(JSON.stringify({ exists: false }));
+      return;
     }
 
     // If userBase already initialized, use it
     if (userBase) {
-      await userBase.ready()
-      const userData = await userBase.getUserData()
-      const req = rpc.request('userCheckResult')
-      req.send(JSON.stringify({ exists: true, user: userData }))
-      return
+      try {
+        await userBase.ready();
+        const userData = await userBase.getUserData();
+        if (userData) {
+          console.log('Found existing user data:', userData.id);
+          const req = rpc.request('userCheckResult');
+          req.send(JSON.stringify({ exists: true, user: userData }));
+          return;
+        } else {
+          console.log('No user data found despite directory existing');
+          const req = rpc.request('userCheckResult');
+          req.send(JSON.stringify({ exists: false }));
+          return;
+        }
+      } catch (err) {
+        console.error('Error getting user data from initialized userBase:', err);
+        // Fall through to re-initialization attempt
+      }
     }
 
     // Otherwise, initialize corestore and userbase
     try {
-      userCorestore = new Corestore(userBasePath)
-      await userCorestore.ready()
+      console.log('Initializing corestore and userbase...');
+      userCorestore = new Corestore(userBasePath);
+      await userCorestore.ready();
 
-      userBase = new UserBase(userCorestore)
-      await userBase.ready()
+      userBase = new UserBase(userCorestore);
+      await userBase.ready();
 
-      const userData = await userBase.getUserData()
-      const req = rpc.request('userCheckResult')
-      req.send(JSON.stringify({ exists: true, user: userData }))
+      const userData = await userBase.getUserData();
+
+      if (userData && userData.id) {
+        console.log('Successfully loaded existing user:', userData.id);
+        const req = rpc.request('userCheckResult');
+        req.send(JSON.stringify({ exists: true, user: userData }));
+      } else {
+        console.log('No valid user data found, treating as new user');
+        const req = rpc.request('userCheckResult');
+        req.send(JSON.stringify({ exists: false }));
+
+        // Clean up incomplete user data
+        if (userBase) {
+          await userBase.close().catch(e => console.error('Error closing userBase:', e));
+          userBase = null;
+        }
+        if (userCorestore) {
+          await userCorestore.close().catch(e => console.error('Error closing userCorestore:', e));
+          userCorestore = null;
+        }
+      }
     } catch (err) {
-      console.error('Error loading existing user:', err)
-      const req = rpc.request('userCheckResult')
+      console.error('Error loading existing user:', err);
+      const req = rpc.request('userCheckResult');
       req.send(JSON.stringify({
         exists: false,
         error: err.message || 'Failed to load user data'
-      }))
+      }));
+
+      // Clean up on error
+      if (userBase) {
+        await userBase.close().catch(() => { });
+        userBase = null;
+      }
+      if (userCorestore) {
+        await userCorestore.close().catch(() => { });
+        userCorestore = null;
+      }
     }
   } catch (error) {
-    console.error('Error in checkExistingUser:', error)
-    const req = rpc.request('userCheckResult')
+    console.error('Error in checkExistingUser:', error);
+    const req = rpc.request('userCheckResult');
     req.send(JSON.stringify({
       exists: false,
       error: error.message || 'Unknown error checking user'
-    }))
+    }));
   }
-}
+};
 
 /************************* 
  * ROOM RELATED FUNCTIONS
@@ -350,9 +404,12 @@ const checkExistingUser = async () => {
 // Replace the existing createRoom function in backend.mjs with this improved version
 const createRoom = async (roomData) => {
   try {
+    console.log('Creating room with data:', roomData);
+
     // First ensure UserBase is initialized
     const ub = await initializeUserBase();
     if (!ub) {
+      console.error('UserBase not initialized');
       throw new Error('UserBase not initialized');
     }
 
@@ -360,6 +417,7 @@ const createRoom = async (roomData) => {
     const user = await ub.getUserData();
 
     if (!user) {
+      console.error('User not found');
       throw new Error('User not found');
     }
 
@@ -383,6 +441,10 @@ const createRoom = async (roomData) => {
 
     const blobStore = new Hyperblobs(blobCore);
     await blobStore.ready();
+
+    // Store blob references in our maps
+    roomBlobCores[roomId] = blobCore;
+    roomBlobStores[roomId] = blobStore;
 
     // Create the room
     const room = new RoomBase(roomCorestore, {
@@ -425,6 +487,8 @@ const createRoom = async (roomData) => {
         system: msg.system || false
       };
 
+      console.log(`New message in room ${roomId}:`, formattedMessage.id);
+
       // Send to client
       const req = rpc.request('newMessage');
       req.send(JSON.stringify({
@@ -436,39 +500,68 @@ const createRoom = async (roomData) => {
 
     // Add this room to the user's rooms list
     let userRooms = [];
-    try {
-      if (user.rooms) {
-        // Parse existing rooms if it's a string
-        if (typeof user.rooms === 'string') {
-          try {
-            userRooms = JSON.parse(user.rooms);
-          } catch (e) {
-            console.error('Error parsing user.rooms:', e);
+
+    // Handle different formats of user.rooms
+    if (user.rooms) {
+      if (typeof user.rooms === 'string') {
+        try {
+          userRooms = JSON.parse(user.rooms);
+          if (!Array.isArray(userRooms)) {
+            console.error('user.rooms parsed to non-array:', userRooms);
             userRooms = [];
           }
-        } else if (Array.isArray(user.rooms)) {
-          userRooms = [...user.rooms];
+        } catch (e) {
+          console.error('Error parsing user.rooms:', e);
+          userRooms = [];
         }
+      } else if (Array.isArray(user.rooms)) {
+        userRooms = [...user.rooms];
       }
-    } catch (e) {
-      console.error('Error processing user rooms:', e);
-      userRooms = [];
     }
 
+    console.log('Current user rooms:', userRooms);
     userRooms.push(newRoom);
-    console.log(`Adding room ${roomId} to user's rooms. Total rooms: ${userRooms.length}`);
+    console.log(`Added room ${roomId} to user's rooms. Total rooms: ${userRooms.length}`);
 
-    // Update the user profile with the new rooms list - convert to string for storage
-    await ub.updateUserProfile({
-      rooms: JSON.stringify(userRooms)
+    // Update the user profile with the new rooms list
+    console.log('Updating user profile with new rooms list');
+    const updatedRooms = JSON.stringify(userRooms);
+    const updateResult = await ub.updateUserProfile({
+      rooms: updatedRooms
     });
 
-    // Get updated user data
+    if (!updateResult.success) {
+      console.error('Error updating user profile:', updateResult.error);
+    }
+
+    // Get updated user data and confirm the update worked
     const updatedUser = await ub.getUserData();
+    console.log('Updated user data:', updatedUser);
+
+    // Double check rooms were saved
+    let savedRooms = [];
+    if (typeof updatedUser.rooms === 'string') {
+      try {
+        savedRooms = JSON.parse(updatedUser.rooms);
+      } catch (e) {
+        console.error('Error parsing updated user.rooms:', e);
+      }
+    } else if (Array.isArray(updatedUser.rooms)) {
+      savedRooms = updatedUser.rooms;
+    }
+
+    console.log(`User now has ${savedRooms.length} rooms saved`);
 
     // Send updated user info back to client
     const userReq = rpc.request('userInfo');
     userReq.send(JSON.stringify(updatedUser));
+
+    // Also send room list update
+    const roomsReq = rpc.request('roomsList');
+    roomsReq.send(JSON.stringify({
+      success: true,
+      rooms: savedRooms
+    }));
 
     // Send room creation response
     const response = {
@@ -480,6 +573,7 @@ const createRoom = async (roomData) => {
     req.send(JSON.stringify(response));
     console.log(`Room ${roomId} created successfully, response sent to client`);
 
+    return response;
   } catch (error) {
     console.error('Error creating room:', error);
     const response = {
@@ -489,9 +583,9 @@ const createRoom = async (roomData) => {
 
     const req = rpc.request('roomCreated');
     req.send(JSON.stringify(response));
+    return response;
   }
 };
-
 
 
 const initializeUserRooms = async () => {
@@ -573,6 +667,10 @@ const initializeRoom = async (roomData) => {
 
     const blobStore = new Hyperblobs(blobCore);
     await blobStore.ready();
+
+    // Store blob references
+    roomBlobCores[roomId] = blobCore;
+    roomBlobStores[roomId] = blobStore;
 
     // Create the room instance - use stored key and encryption key if available
     let roomOptions = {
@@ -982,6 +1080,24 @@ const cleanupResources = async () => {
 
     for (const roomId of roomIds) {
       try {
+        // Close blob resources first
+        if (roomBlobStores[roomId]) {
+          console.log(`Closing blobstore for room: ${roomId}`);
+          await roomBlobStores[roomId].close().catch(err => {
+            console.error(`Error closing blobstore for room ${roomId}:`, err);
+          });
+          delete roomBlobStores[roomId];
+        }
+
+        if (roomBlobCores[roomId]) {
+          console.log(`Closing blobcore for room: ${roomId}`);
+          await roomBlobCores[roomId].close().catch(err => {
+            console.error(`Error closing blobcore for room ${roomId}:`, err);
+          });
+          delete roomBlobCores[roomId];
+        }
+
+        // Then close the room instance
         if (roomBases[roomId]) {
           console.log(`Closing room: ${roomId}`);
           await roomBases[roomId].close().catch(err => {
@@ -1005,6 +1121,8 @@ const cleanupResources = async () => {
     // Reset room collections
     roomBases = {};
     roomCorestores = {};
+    roomBlobStores = {};
+    roomBlobCores = {};
 
     // Close user resources with proper null checks
     if (userBase) {

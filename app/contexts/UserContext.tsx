@@ -47,12 +47,12 @@ interface UserProviderProps {
 // Create the provider component
 export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
   // State
+
   const [user, setUser] = useState<UserData | null>(null);
-  const [seedPhrase, setSeedPhrase] = useState<string[] | null>([]);
+  const [seedPhrase, setSeedPhrase] = useState<string[] | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<Error | null>(null);
-
   // Load user data from storage on initial mount
   useEffect(() => {
     const loadUserData = async () => {
@@ -69,22 +69,26 @@ export const UserProvider: React.FC<UserProviderProps> = ({ children }) => {
   }, [isAuthenticated]);
 
   // Update username
-  const updateUser = useCallback(async (user: UserData) => {
-    if (!user) {
-      throw new Error('No authenticated user');
+  const updateUser = useCallback(async (userData: UserData) => {
+    console.log('UserContext: Updating user data:', userData?.id);
+    if (!userData) {
+      console.error('Cannot update user with null data');
+      return;
     }
+
     try {
-      setUser(prevUser =>
-        user
-      );
+      // Update user state
+      setUser(userData);
+      setIsAuthenticated(true);
+      setIsLoading(false);
+      console.log('User data updated successfully');
     } catch (err) {
-      console.error('Failed to update username:', err);
-      setError(err instanceof Error ? err : new Error('Failed to update username'));
-      throw err;
+      console.error('Failed to update user data:', err);
+      setError(err instanceof Error ? err : new Error('Failed to update user data'));
     }
   }, []);
 
-  // Get user's public key
+
   const getUserPublicKey = useCallback(async () => {
     if (!user) {
       return null;

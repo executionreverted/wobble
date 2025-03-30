@@ -83,8 +83,13 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
               try {
                 const data = b4a.toString(req.data);
                 const parsedData = JSON.parse(data);
-                console.log('Seed generated:', parsedData);
-                storeSeedPhrase(parsedData);
+                console.log('Seed generated, length:', parsedData.length);
+
+                if (Array.isArray(parsedData) && parsedData.length > 0) {
+                  storeSeedPhrase(parsedData);
+                } else {
+                  console.error('Received invalid seed data:', parsedData);
+                }
               }
               catch (e) {
                 console.error('Error handling seedGenerated:', e);
@@ -130,7 +135,39 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
               }
             }
 
-            // Handle room-related RPC responses
+
+            if (req.command === 'roomCreated') {
+              try {
+                const data = b4a.toString(req.data);
+                const parsedData = JSON.parse(data);
+                console.log('Room created response received:', parsedData);
+
+                if (parsedData.success && parsedData.room) {
+                  // If the room was successfully created
+                  if (onRoomCreated) {
+                    console.log('Calling onRoomCreated callback with room data');
+                    onRoomCreated(parsedData.room);
+                  } else {
+                    console.log('No onRoomCreated callback registered, requesting updated user info');
+                  }
+
+                  // Request updated user info to make sure rooms are updated
+                  console.log('Requesting updated user info after room creation');
+                  const userCheckRequest = client.request('checkUserExists');
+                  userCheckRequest.send("");
+
+                  // Also request updated room list
+                  console.log('Requesting updated room list');
+                  const roomsRequest = client.request('getRooms');
+                  roomsRequest.send("");
+                } else {
+                  console.error('Room creation failed:', parsedData.error || 'Unknown error');
+                }
+              } catch (e) {
+                console.error('Error handling roomCreated:', e);
+              }
+            }
+
             if (req.command === 'roomsList') {
               try {
                 const data = b4a.toString(req.data);
@@ -138,28 +175,17 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
                 console.log('Rooms list received:', parsedData);
 
                 if (updateRooms && Array.isArray(parsedData.rooms)) {
+                  console.log('Updating rooms with:', parsedData.rooms.length, 'rooms');
                   updateRooms(parsedData.rooms);
                 } else {
-                  console.log('Cannot update rooms: updateRooms callback missing or invalid data');
+                  console.log('Cannot update rooms:', {
+                    hasUpdateFn: !!updateRooms,
+                    isArray: Array.isArray(parsedData.rooms),
+                    rooms: parsedData.rooms
+                  });
                 }
               } catch (e) {
                 console.error('Error handling roomsList:', e);
-              }
-            }
-
-            if (req.command === 'roomCreated') {
-              try {
-                const data = b4a.toString(req.data);
-                const parsedData = JSON.parse(data);
-                console.log('Room created:', parsedData);
-
-                if (parsedData.success && parsedData.room) {
-                  // Instead of calling a separate handler, request updated user info
-                  const userCheckRequest = client.request('checkUserExists');
-                  userCheckRequest.send("");
-                }
-              } catch (e) {
-                console.error('Error handling roomCreated:', e);
               }
             }
 
@@ -305,12 +331,17 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
 
   const generateSeedPhrase = useCallback(async (): Promise<any> => {
     if (!rpcClient) {
-      console.error('NO RPC');
+      console.error('Cannot generate seed: RPC client not initialized');
       return [];
     }
     try {
+      console.log('Requesting seed phrase from backend');
       const request = rpcClient.request('generateSeed');
       await request.send();
+      console.log('Seed phrase request sent');
+      // The actual seed will be returned via the RPC callback
+      // and stored through the storeSeedPhrase callback
+      return true;
     } catch (err) {
       console.error('Failed to generate seed phrase:', err);
       throw err instanceof Error ? err : new Error('Failed to generate seed phrase');
@@ -319,14 +350,30 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
 
   const confirmSeedPhrase = useCallback(async (seedPhrase: string[]): Promise<{ success: boolean, userId?: string, error?: string }> => {
     if (!rpcClient) {
-      console.error('NO RPC');
+      console.error('Cannot confirm seed: RPC client not initialized');
       return { success: false, error: 'RPC client not initialized' };
     }
 
     try {
+      console.log('Confirming seed phrase, length:', seedPhrase.length);
+
+      // Ensure seed is properly formatted
+      if (!Array.isArray(seedPhrase) || seedPhrase.length === 0) {
+        console.error('Invalid seed format:', typeof seedPhrase);
+        return {
+          success: false,
+          error: 'Invalid seed format'
+        };
+      }
+
+      // Log seed for debugging (in production, would be removed for security)
+      console.log('Using seed:', seedPhrase);
+
       const request = rpcClient.request('confirmSeed');
       await request.send(JSON.stringify(seedPhrase));
-      return { success: true, error: "" }
+      console.log('Seed confirmation request sent');
+
+      return { success: true };
     } catch (err) {
       console.error('Failed to confirm seed phrase:', err);
       return {
@@ -335,7 +382,6 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       };
     }
   }, [rpcClient]);
-
   const checkExistingUser = useCallback(async (): Promise<{ exists: boolean, user?: any, error?: string }> => {
     if (!rpcClient) {
       console.error('RPC client not initialized');

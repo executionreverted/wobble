@@ -430,31 +430,102 @@ class UserBase extends ReadyResource {
         return { success: false, error: 'User profile not found' };
       }
 
+      console.log('Updating user profile with:', profileData);
+
       // Prepare updated user data (keeping existing values for fields not in profileData)
       const updatedUser = {
         ...existingUser,
         name: profileData.name !== undefined ? profileData.name : existingUser.name,
-        status: profileData.status !== undefined ? profileData.status : existingUser.status
+        status: profileData.status !== undefined ? profileData.status : existingUser.status,
+        seed: existingUser.seed  // Always preserve the seed
       };
 
       // Handle special fields that need to be JSON strings in the database
       if (profileData.rooms !== undefined) {
-        // If rooms is already a string, use it directly, otherwise stringify it
-        updatedUser.rooms = typeof profileData.rooms === 'string'
-          ? profileData.rooms
-          : JSON.stringify(profileData.rooms);
+        try {
+          // If rooms is already a string, verify it's valid JSON
+          if (typeof profileData.rooms === 'string') {
+            // Verify it's valid JSON that parses to an array
+            const parsed = JSON.parse(profileData.rooms);
+            if (!Array.isArray(parsed)) {
+              console.error('rooms field is not an array after parsing:', parsed);
+              updatedUser.rooms = '[]'; // Reset to empty array if invalid
+            } else {
+              updatedUser.rooms = profileData.rooms;
+            }
+          } else if (Array.isArray(profileData.rooms)) {
+            // If it's already an array, stringify it
+            updatedUser.rooms = JSON.stringify(profileData.rooms);
+          } else {
+            console.error('Invalid type for rooms:', typeof profileData.rooms);
+            updatedUser.rooms = '[]'; // Default to empty array
+          }
+        } catch (err) {
+          console.error('Error processing rooms data:', err);
+          updatedUser.rooms = '[]';
+        }
       }
 
       if (profileData.contacts !== undefined) {
-        // If contacts is already a string, use it directly, otherwise stringify it
-        updatedUser.contacts = typeof profileData.contacts === 'string'
-          ? profileData.contacts
-          : JSON.stringify(profileData.contacts);
+        try {
+          // If contacts is already a string, verify it's valid JSON
+          if (typeof profileData.contacts === 'string') {
+            // Verify it's valid JSON
+            JSON.parse(profileData.contacts);
+            updatedUser.contacts = profileData.contacts;
+          } else if (Array.isArray(profileData.contacts)) {
+            updatedUser.contacts = JSON.stringify(profileData.contacts);
+          } else {
+            console.error('Invalid type for contacts:', typeof profileData.contacts);
+            updatedUser.contacts = '[]'; // Default to empty array
+          }
+        } catch (err) {
+          console.error('Error processing contacts data:', err);
+          updatedUser.contacts = '[]';
+        }
       }
 
-      // Dispatch the profile update
-      const dispatchData = dispatch('@userbase/set-metadata', updatedUser);
-      await this.base.append(dispatchData);
+      console.log('Dispatching profile update with:', updatedUser);
+
+      // Make sure all fields are defined and not null before dispatch
+      Object.keys(updatedUser).forEach(key => {
+        if (updatedUser[key] === undefined || updatedUser[key] === null) {
+          if (key === 'contacts' || key === 'rooms') {
+            updatedUser[key] = '[]';
+          } else if (key === 'status') {
+            updatedUser[key] = 'Available';
+          } else if (key !== 'id' && key !== 'name' && key !== 'seed') {
+            // Don't override critical fields, but provide defaults for others
+            updatedUser[key] = '';
+          }
+        }
+      });
+
+      // Ensure required fields exist
+      if (!updatedUser.id) {
+        updatedUser.id = this.userPubKey;
+      }
+
+      if (!updatedUser.name) {
+        updatedUser.name = "User-" + Math.ceil(Math.random() * 10000);
+      }
+
+      if (!updatedUser.status) {
+        updatedUser.status = "Available";
+      }
+
+      if (!updatedUser.seed) {
+        updatedUser.seed = this.userSeed || "";
+      }
+
+      // Dispatch the profile update with safe data
+      try {
+        const dispatchData = dispatch('@userbase/set-metadata', updatedUser);
+        await this.base.append(dispatchData);
+      } catch (dispatchErr) {
+        console.error('Error dispatching profile update:', dispatchErr);
+        return { success: false, error: dispatchErr.message || 'Failed to dispatch profile update' };
+      }
 
       // Update local properties
       this.userName = updatedUser.name;
@@ -463,6 +534,7 @@ class UserBase extends ReadyResource {
       // Update local arrays from their string representation
       try {
         this.userRooms = updatedUser.rooms ? JSON.parse(updatedUser.rooms) : [];
+        console.log('Updated userRooms to:', this.userRooms);
       } catch (e) {
         console.error('Error parsing rooms:', e);
         this.userRooms = [];
@@ -482,6 +554,8 @@ class UserBase extends ReadyResource {
       return { success: false, error: error.message || 'Failed to update profile' };
     }
   }
+
+
   async getUserInfo() {
     try {
       return await this.base.view.findOne('@userbase/metadata', {});

@@ -21,22 +21,26 @@ const SeedPhraseLogin = () => {
 
   useEffect(() => {
     if (!navigated && user) {
-      setNavigated(true)
+      console.log('User detected, navigating to MainTabs');
+      setNavigated(true);
       navigation.navigate('MainTabs');
     }
-  }, [user])
+  }, [user, navigated, navigation]);
 
 
   useEffect(() => {
     const checkForUser = async () => {
       try {
+        console.log('Checking for existing user account...');
         setIsLoading(true);
         setLoadingMessage('Checking for existing account...');
 
         const result = await checkExistingUser();
+        console.log('User check result:', result);
 
         if (!result.exists) {
           // No existing user, generate a new seed phrase
+          console.log('No existing user found, generating seed phrase');
           setLoadingMessage('Generating new seed phrase...');
           await generatePhrase();
         }
@@ -45,6 +49,7 @@ const SeedPhraseLogin = () => {
       } catch (error) {
         console.error('Error checking for user:', error);
         // Fall back to generating a new phrase
+        console.log('Error during user check, falling back to seed generation');
         setLoadingMessage('Generating new seed phrase...');
         await generatePhrase();
       } finally {
@@ -55,7 +60,7 @@ const SeedPhraseLogin = () => {
     if (!checkedExisting) {
       checkForUser();
     }
-  }, [checkedExisting]);
+  }, [checkedExisting, checkExistingUser, generatePhrase]);
 
 
   useEffect(() => {
@@ -65,15 +70,26 @@ const SeedPhraseLogin = () => {
   const generatePhrase = async () => {
     setIsLoading(true);
     try {
-      // In a real implementation, we would call the backend via IPC RPC
-      // For demo purposes, we'll generate a mock seed phrase
-      await generateSeedPhrase()
+      console.log('Requesting seed phrase generation');
+      await generateSeedPhrase();
+      console.log('Seed phrase requested successfully');
     } catch (error) {
       console.error('Error generating seed phrase:', error);
       Alert.alert('Error', 'Failed to generate seed phrase. Please try again.');
-      setIsLoading(false)
     } finally {
-      setIsLoading(false);
+      // Keep loading state until seed is received
+      // The seed will be stored via storeSeedPhrase callback
+      // We'll set isLoading to false when we receive the seed
+      setTimeout(() => {
+        if (seedPhrase && seedPhrase.length > 0) {
+          console.log('Seed phrase received, length:', seedPhrase.length);
+          setIsLoading(false);
+        } else {
+          console.log('No seed phrase received yet, retrying');
+          // Retry if we didn't get the seed
+          generatePhrase();
+        }
+      }, 1000);
     }
   };
 
@@ -82,17 +98,31 @@ const SeedPhraseLogin = () => {
   };
 
   const handleConfirm = async () => {
-    // In a real implementation, we would store the seed phrase
-    // For now, we'll just log in the user
     try {
-      if (!seedPhrase || seedPhrase.length == 0) {
-        throw new Error("Invalid seed")
+      console.log('Confirming seed phrase...');
+      if (!seedPhrase || seedPhrase.length === 0) {
+        console.error('No seed phrase available to confirm');
+        throw new Error("No seed phrase available");
       }
-      await confirmSeedPhrase(seedPhrase)
-      // @ts-ignore
+
+      setIsLoading(true);
+      setLoadingMessage('Creating your account...');
+
+      console.log('Sending seed confirmation, seed length:', seedPhrase.length);
+      const result = await confirmSeedPhrase(seedPhrase);
+
+      if (!result.success) {
+        console.error('Seed confirmation failed:', result.error);
+        throw new Error(result.error || 'Failed to confirm seed phrase');
+      }
+
+      console.log('Seed phrase confirmed successfully');
+      // The user update will be handled by the WorkletContext
+      // which will trigger navigation when user is updated
     } catch (error) {
       console.error('Login error:', error);
-      Alert.alert('Error', 'Failed to log in. Please try again.');
+      Alert.alert('Error', 'Failed to create account. Please try again.');
+      setIsLoading(false);
     }
   };
 

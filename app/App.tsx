@@ -69,11 +69,11 @@ const AppNavigator = () => {
 
   const { isInitialized, isLoading, isBackendReady, reinitializeBackend } = useWorklet();
   const [appReady, setAppReady] = useState(false);
-  const timeoutRef = useRef(null);
+  const timeoutRef = useRef<any>(null);
 
   // Wait for worklet initialization to complete
   useEffect(() => {
-    if (isInitialized && !isLoading && isBackendReady) {
+    if (isAuthenticated && isInitialized && !isLoading && isBackendReady) {
       // Add a small delay to ensure everything is loaded
       const timer = setTimeout(() => {
         setAppReady(true);
