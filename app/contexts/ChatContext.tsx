@@ -3,6 +3,11 @@ import { Room, Message, User, ChatContextType } from '../types';
 import useUser from '../hooks/useUser';
 import useWorklet from '../hooks/useWorklet';
 
+
+interface MessagesByRoom {
+  [roomId: string]: Message[];
+}
+
 // Default context values
 const defaultChatContext: ChatContextType = {
   rooms: [],
@@ -30,11 +35,16 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   // State
   const [rooms, setRooms] = useState<Room[]>([]);
   const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messagesByRoom, setMessagesByRoom] = useState<{ [roomId: string]: Message[] }>({});
   const [onlineUsers, setOnlineUsers] = useState<User[]>([]);
-  const [oldestMessageTimestamp, setOldestMessageTimestamp] = useState<number | null>(null);
-  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
   const [hasMoreMessages, setHasMoreMessages] = useState<boolean>(true);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+
+  // Get current room's messages
+  const getCurrentMessages = useCallback(() => {
+    return currentRoom ? (messagesByRoom[currentRoom.id] || []) : [];
+  }, [currentRoom, messagesByRoom]);
+
 
   // Initialize rooms from backend when worklet is ready
   useEffect(() => {
@@ -56,18 +66,6 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     }
   }, [user]);
 
-  // Update oldest message timestamp when messages change
-  useEffect(() => {
-    if (messages.length > 0) {
-      // Find the oldest message (smallest timestamp)
-      const oldest = messages.reduce((oldest, current) =>
-        current.timestamp < oldest.timestamp ? current : oldest, messages[0]);
-
-      setOldestMessageTimestamp(oldest.timestamp);
-    } else {
-      setOldestMessageTimestamp(null);
-    }
-  }, [messages]);
 
   // Callback handlers for WorkletContext
   const handleUpdateRooms = useCallback((updatedRooms: Room[]) => {
@@ -75,37 +73,67 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   }, []);
 
 
+  useEffect(() => {
+    if (isInitialized && rpcClient) {
+      refreshRooms();
+
+      // Set up callbacks for WorkletContext
+      setCallbacks({
+        updateRooms: handleUpdateRooms,
+        updateMessages: handleUpdateMessages,
+        onRoomCreated: handleRoomCreated
+      });
+    }
+  }, [isInitialized, rpcClient]);
+
   const handleUpdateMessages = useCallback((newMessages: Message[], replace = false) => {
-    setMessages(prev => {
+    console.log('Handling update messages')
+    if (!newMessages.length) return;
+
+    // Get roomId from the first message
+    const roomId = newMessages[0].roomId;
+
+    setMessagesByRoom(prevByRoom => {
+      const existingMessages = prevByRoom[roomId] || [];
+
+      console.log('Existing messages', existingMessages)
+      let updatedMessages: Message[];
       if (replace) {
-        return [...newMessages].sort((a, b) => b.timestamp - a.timestamp); // Sort newest first
+        // Replace entire message list for this room
+        //
+        updatedMessages = [...newMessages].sort((a, b) => b.timestamp - a.timestamp);
+
+        console.log('Replacing...', updatedMessages)
+      } else {
+        // Merge existing and new messages without duplicates
+        const messageMap = new Map();
+
+        // Add existing messages to map
+        existingMessages.forEach(msg => messageMap.set(msg.id, msg));
+
+        // Add new messages to map
+        newMessages.forEach(msg => messageMap.set(msg.id, msg));
+
+        // Convert back to array and sort
+        updatedMessages = Array.from(messageMap.values())
+          .sort((a, b) => b.timestamp - a.timestamp);
       }
 
-      // Combine old and new messages, removing duplicates based on id
-      const messageMap = new Map();
-
-      // Add existing messages to map
-      prev.forEach(msg => {
-        messageMap.set(msg.id, msg);
-      });
-
-      // Add or update with new messages
-      newMessages.forEach(msg => {
-        messageMap.set(msg.id, msg);
-      });
-
-      // Convert map back to array and sort by timestamp (newest first)
-      return Array.from(messageMap.values())
-        .sort((a, b) => b.timestamp - a.timestamp);
+      // Return updated messagesByRoom
+      return {
+        ...prevByRoom,
+        [roomId]: updatedMessages
+      };
     });
 
-    // Check if we received the full expected count, if not, there are no more messages
-    if (newMessages.length < 20) { // Assuming 20 per page
+    // Update hasMoreMessages flag
+    if (newMessages.length < 20) {
       setHasMoreMessages(false);
     } else {
       setHasMoreMessages(true);
     }
   }, []);
+
 
   const handleRoomCreated = useCallback((room: Room) => {
     setRooms(prev => {
@@ -156,11 +184,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     }
   };
 
-  // Select a room and join it
   const selectRoom = async (room: Room) => {
-    setMessages([]); // Clear previous messages
     setHasMoreMessages(true); // Reset pagination state
-    setOldestMessageTimestamp(null);
     setCurrentRoom(room);
 
     // Call backend to join room if we have a worklet
@@ -197,9 +222,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       }
     }
     setCurrentRoom(null);
-    setMessages([]);
     setHasMoreMessages(true);
-    setOldestMessageTimestamp(null);
   };
 
   const sendMessage = async (text: string) => {
@@ -223,10 +246,19 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   };
 
   // Load older messages (for pagination)
+
   const loadMoreMessages = async (): Promise<boolean> => {
-    if (!currentRoom || !rpcClient || !isInitialized || isLoadingMore || !hasMoreMessages || !oldestMessageTimestamp) {
+    if (!currentRoom || !rpcClient || !isInitialized || isLoadingMore || !hasMoreMessages) {
       return false;
     }
+
+    const messages = getCurrentMessages();
+    if (messages.length === 0) {
+      return false;
+    }
+
+    // Get the oldest message timestamp
+    const oldestMessage = messages[messages.length - 1];
 
     try {
       setIsLoadingMore(true);
@@ -235,7 +267,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       const request = rpcClient.request('loadMoreMessages');
       await request.send(JSON.stringify({
         roomId: currentRoom.id,
-        before: oldestMessageTimestamp,
+        before: oldestMessage.timestamp,
         limit: 20 // Number of messages to load
       }));
 
@@ -253,12 +285,13 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     }
   };
 
+
   return (
     <ChatContext.Provider
       value={{
         rooms,
         currentRoom,
-        messages,
+        messages: getCurrentMessages(),
         onlineUsers,
         selectRoom,
         leaveRoom,

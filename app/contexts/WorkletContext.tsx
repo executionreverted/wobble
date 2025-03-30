@@ -47,6 +47,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
   const [updateRooms, setUpdateRooms] = useState<((rooms: Room[]) => void) | undefined>(undefined);
   const [updateMessages, setUpdateMessages] = useState<((messages: Message[], replace: boolean) => void) | undefined>(undefined);
   const [onRoomCreated, setOnRoomCreated] = useState<((room: Room) => void) | undefined>(undefined);
+  const [onRoomJoined, setOnRoomJoined] = useState<((room: Room) => void) | undefined>(undefined);
 
   // Initialize worklet on component mount
   useEffect(() => {
@@ -162,10 +163,13 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
               try {
                 const data = b4a.toString(req.data);
                 const parsedData = JSON.parse(data);
-                console.log('Room messages received:', parsedData);
+                console.log('Room messages received in handler:', parsedData);
 
-                if (updateMessages && Array.isArray(parsedData.messages)) {
-                  updateMessages(parsedData.messages);
+                if (updateMessages && parsedData.success && Array.isArray(parsedData.messages)) {
+                  // Replace current messages with the initial message set
+                  // Debug what's being passed to updateMessages
+                  console.log('Sending messages to update function:', parsedData.messages.length);
+                  updateMessages(parsedData.messages, true);
                 }
               } catch (e) {
                 console.error('Error handling roomMessages:', e);
@@ -177,11 +181,16 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
               try {
                 const data = b4a.toString(req.data);
                 const parsedData = JSON.parse(data);
-                console.log('New message received:', parsedData); // Add this debug log
+                console.log('Raw message from backend:', parsedData);
 
                 if (updateMessages && parsedData.success && parsedData.message) {
-                  // Add the new message to the existing messages
-                  updateMessages([parsedData.message], false);
+                  // Ensure message has all required fields correctly formatted
+                  const formattedMessage = {
+                    ...parsedData.message,
+                    system: Boolean(parsedData.message.system), // Ensure boolean
+                  };
+                  console.log('Formatted message for UI:', formattedMessage);
+                  updateMessages([formattedMessage], false);
                 }
               } catch (e) {
                 console.error('Error handling newMessage:', e);
@@ -221,6 +230,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
 
           }
         );
+        const r = client.request("reinitialize")
+        await r.send("")
 
         setWorklet(newWorklet);
         setRpcClient(client);
@@ -313,11 +324,14 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
   const setCallbacks = useCallback((callbacks: {
     updateRooms?: (rooms: Room[]) => void,
     updateMessages?: (messages: Message[], bool: boolean) => void,
-    onRoomCreated?: (room: Room) => void
+    onRoomCreated?: (room: Room) => void,
+    onRoomJoined?: (n: any) => void
   }) => {
+    console.log('Setting callbacks on wrapper', callbacks)
     if (callbacks.updateRooms) setUpdateRooms(() => callbacks.updateRooms);
     if (callbacks.updateMessages) setUpdateMessages(() => callbacks.updateMessages);
     if (callbacks.onRoomCreated) setOnRoomCreated(() => callbacks.onRoomCreated);
+    if (callbacks.onRoomJoined) setOnRoomJoined(() => callbacks.onRoomJoined);
   }, []);
 
 

@@ -35,17 +35,18 @@ export type AuthContextType = {
   register: (username: string, password: string) => Promise<void>;
 };
 
+
 export type ChatContextType = {
   rooms: Room[];
   currentRoom: Room | null;
-  messages: Message[];
+  messages: Message[]; // This is now a computed value from messagesByRoom
   onlineUsers: User[];
   selectRoom: (room: Room) => Promise<void>;
   leaveRoom: () => void;
   sendMessage: (text: string) => Promise<void>;
   refreshRooms: () => Promise<void>;
   createRoom: (name: string, description: string) => Promise<{ success: boolean, roomId: string }>;
-  loadMoreMessages: () => Promise<boolean>; // New function to load more messages
+  loadMoreMessages: () => Promise<boolean>;
 };
 
 export type SeedPhraseResponse = string[];

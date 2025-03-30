@@ -93,9 +93,9 @@ const rpc = new RPC(IPC, (req, error) => {
     teardown()
   }
 
-
   // Add this to your RPC command handlers:
   if (req.command === 'reinitialize') {
+    console.info('REINIT')
     reinitializeBackend();
   }
 
@@ -723,7 +723,7 @@ const sendMessage = async (messageData) => {
       content: messageData.content,
       sender: messageData.sender,
       timestamp: messageData.timestamp || Date.now(),
-      system: messageData.system || false
+      system: Boolean(messageData.system), // Ensure it's a boolean
     };
 
     // Send the message - this will trigger the 'new-message' event we're listening for
@@ -862,73 +862,98 @@ const getRooms = async () => {
 
 
 // Clean up all resources properly
+// In backend.mjs, replace the cleanupResources function with this robust version:
+
 const cleanupResources = async () => {
   console.log('Cleaning up all resources...');
 
-  // Close all room instances
-  for (const roomId in roomBases) {
-    try {
-      if (roomBases[roomId]) {
-        console.log(`Closing room: ${roomId}`);
-        await roomBases[roomId].close().catch(err => {
-          console.error(`Error closing room ${roomId}:`, err);
-        });
+  // Wrap entire cleanup in try/catch to ensure it continues even if parts fail
+  try {
+    // Close all room instances
+    const roomIds = Object.keys(roomBases);
+    console.log(`Closing ${roomIds.length} rooms...`);
+
+    for (const roomId of roomIds) {
+      try {
+        if (roomBases[roomId]) {
+          console.log(`Closing room: ${roomId}`);
+          await roomBases[roomId].close().catch(err => {
+            console.error(`Error closing room ${roomId}:`, err);
+          });
+          delete roomBases[roomId];
+        }
+
+        if (roomCorestores[roomId]) {
+          await roomCorestores[roomId].close().catch(err => {
+            console.error(`Error closing room corestore ${roomId}:`, err);
+          });
+          delete roomCorestores[roomId];
+        }
+      } catch (err) {
+        console.error(`Error during room cleanup for ${roomId}:`, err);
+        // Continue with other rooms even if one fails
       }
+    }
 
-      if (roomCorestores[roomId]) {
-        await roomCorestores[roomId].close().catch(err => {
-          console.error(`Error closing room corestore ${roomId}:`, err);
+    // Reset room collections
+    roomBases = {};
+    roomCorestores = {};
+
+    // Close user resources with proper null checks
+    if (userBase) {
+      try {
+        console.log('Closing userBase...');
+        await userBase.close().catch(err => {
+          console.error('Error closing userBase:', err);
         });
+      } catch (err) {
+        console.error('Error during userBase cleanup:', err);
+      } finally {
+        userBase = null;
       }
-    } catch (err) {
-      console.error(`Error during room cleanup for ${roomId}:`, err);
     }
-    isBackendInitialized = false
-  }
 
-  // Reset room collections
-  roomBases = {};
-  roomCorestores = {};
-
-  // Close user resources
-  if (userBase) {
-    try {
-      console.log('Closing userBase...');
-      await userBase.close().catch(err => {
-        console.error('Error closing userBase:', err);
-      });
-      userBase = null;
-    } catch (err) {
-      console.error('Error during userBase cleanup:', err);
+    if (userCorestore) {
+      try {
+        console.log('Closing userCorestore...');
+        await userCorestore.close().catch(err => {
+          console.error('Error closing userCorestore:', err);
+        });
+      } catch (err) {
+        console.error('Error during userCorestore cleanup:', err);
+      } finally {
+        userCorestore = null;
+      }
     }
-  }
 
-  if (userCorestore) {
-    try {
-      console.log('Closing userCorestore...');
-      await userCorestore.close().catch(err => {
-        console.error('Error closing userCorestore:', err);
-      });
-      userCorestore = null;
-    } catch (err) {
-      console.error('Error during userCorestore cleanup:', err);
-    }
+    isBackendInitialized = false;
+  } catch (err) {
+    console.error('Fatal error during cleanup:', err);
   }
 
   console.log('Resource cleanup complete');
 }
+
+
+
 let trying;
 // Reinitialize backend after cleanup
+// In backend.mjs, replace the reinitializeBackend function with this improved version:
+
 const reinitializeBackend = async () => {
   console.log('Reinitializing backend...');
   if (trying) return;
   trying = true;
-  // Clean up existing resources first
-  await cleanupResources();
 
-  // Reinitialize user if account exists
-  if (hasAccount()) {
-    try {
+  try {
+    // Clean up existing resources first
+    await cleanupResources();
+
+    // Add a delay to ensure resources are fully released
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Reinitialize user if account exists
+    if (hasAccount()) {
       console.log('Reinitializing user account...');
       await initializeUserBase();
 
@@ -942,25 +967,26 @@ const reinitializeBackend = async () => {
         const userReq = rpc.request('userInfo');
         userReq.send(JSON.stringify(userData));
       }
-    } catch (err) {
-      console.error('Error reinitializing user account:', err);
+    } else {
+      console.log('No user account found');
+      // Just notify that backend is ready
       const req = rpc.request('backendInitialized');
-      req.send(JSON.stringify({
-        success: false,
-        error: err.message || 'Failed to initialize user account'
-      }));
+      req.send(JSON.stringify({ success: true }));
     }
-  } else {
-    console.log('No user')
-    // Just notify that backend is ready
+  } catch (err) {
+    console.error('Error reinitializing backend:', err);
+    // Still notify client, but with error
     const req = rpc.request('backendInitialized');
-    req.send(JSON.stringify({ success: true }));
+    req.send(JSON.stringify({
+      success: false,
+      error: err.message || 'Failed to initialize backend'
+    }));
+  } finally {
+    trying = false;
+    isBackendInitialized = true;
+    console.log('Backend reinitialization complete');
   }
-  trying = false;
-  isBackendInitialized = true;
-  console.log('Backend reinitialization complete');
 }
-
 // Enhanced teardown function
 const teardown = async () => {
   console.log('Performing teardown...');

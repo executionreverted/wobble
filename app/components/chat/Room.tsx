@@ -76,10 +76,13 @@ const EnhancedChatRoom = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const navigation = useNavigation();
-  const route = useRoute();
   const insets = useSafeAreaInsets();
   const flatListRef = useRef(null);
 
+
+  useEffect(() => {
+    console.log("Messages in Room component:", messages, currentRoom);
+  }, [messages]);
   // Set room name in header
   useEffect(() => {
     if (currentRoom) {

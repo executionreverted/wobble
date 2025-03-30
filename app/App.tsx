@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -69,6 +69,7 @@ const AppNavigator = () => {
 
   const { isInitialized, isLoading, isBackendReady, reinitializeBackend } = useWorklet();
   const [appReady, setAppReady] = useState(false);
+  const timeoutRef = useRef(null);
 
   // Wait for worklet initialization to complete
   useEffect(() => {
@@ -80,27 +81,30 @@ const AppNavigator = () => {
 
       return () => clearTimeout(timer);
     }
-  }, [isInitialized, isLoading, isBackendReady]);
 
+    // Add a timeout to prevent endless loading
+    if (!appReady && !timeoutRef.current) {
+      timeoutRef.current = setTimeout(() => {
+        console.log("Loading timeout - forcing app ready state");
+        // If we're still loading after 10 seconds, force app to ready state
+        setAppReady(true);
 
-  useEffect(() => {
-    const handleAppStateChange = async (nextAppState: string) => {
-      if (nextAppState === 'active' && !isLoading && isInitialized && isBackendReady) {
-        // App came to foreground, reinitialize backend to ensure clean state
-        console.log('App came to foreground, reinitializing backend...');
-        await reinitializeBackend();
-      }
-    };
-
-    // Subscribe to app state changes
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
+        // Try to reinitialize the backend
+        if (reinitializeBackend) {
+          reinitializeBackend().catch(err => {
+            console.error("Error reinitializing after timeout:", err);
+          });
+        }
+      }, 10000); // 10 second timeout
+    }
 
     return () => {
-      subscription.remove();
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
     };
-  }, [isInitialized, isBackendReady, isLoading, reinitializeBackend]);
-
-
+  }, [isInitialized, isLoading, isBackendReady, appReady, reinitializeBackend]);
   // Show loader if app is not ready yet
   if (!appReady) {
     return <Loader message="Setting up your secure connection..." />;
