@@ -49,105 +49,98 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   // Initialize rooms from backend when worklet is ready
   useEffect(() => {
     if (isInitialized && rpcClient) {
-      refreshRooms();
+      console.log('ChatContext: Registering callbacks with WorkletContext');
 
-      // Set up callbacks for WorkletContext
+      // Define the callback functions
+      const updateRoomsCallback = (updatedRooms: Room[]) => {
+        console.log('ChatContext: Received rooms update', updatedRooms.length);
+        setRooms(updatedRooms);
+      };
+
+      const updateMessagesCallback = (newMessages: Message[], replace = false) => {
+        console.log('ChatContext: Received messages update', newMessages.length, 'replace:', replace);
+
+        if (!newMessages || newMessages.length === 0) return;
+
+        // Get roomId from the first message or current room
+        const roomId = newMessages[0]?.roomId || (currentRoom ? currentRoom.id : null);
+
+        if (!roomId) {
+          console.error('Cannot determine roomId for messages');
+          return;
+        }
+
+        setMessagesByRoom(prevByRoom => {
+          const existingMessages = prevByRoom[roomId] || [];
+
+          let updatedMessages: Message[];
+          if (replace) {
+            // Replace entire message list for this room
+            updatedMessages = [...newMessages].sort((a, b) => b.timestamp - a.timestamp);
+            console.log('Replacing with messages:', updatedMessages.length);
+          } else {
+            // Merge existing and new messages without duplicates
+            const messageMap = new Map();
+
+            // Add existing messages to map
+            existingMessages.forEach(msg => messageMap.set(msg.id, msg));
+
+            // Add new messages to map
+            newMessages.forEach(msg => messageMap.set(msg.id, msg));
+
+            // Convert back to array and sort
+            updatedMessages = Array.from(messageMap.values())
+              .sort((a, b) => b.timestamp - a.timestamp);
+            console.log('Updated messages count:', updatedMessages.length);
+          }
+
+          // Return updated messagesByRoom
+          return {
+            ...prevByRoom,
+            [roomId]: updatedMessages
+          };
+        });
+
+        // Update hasMoreMessages flag
+        if (newMessages.length < 20) {
+          setHasMoreMessages(false);
+        } else {
+          setHasMoreMessages(true);
+        }
+      };
+
+      const roomCreatedCallback = (room: Room) => {
+        console.log('ChatContext: Room created callback', room.id);
+        setRooms(prev => {
+          // Check if the room already exists
+          const exists = prev.some(r => r.id === room.id);
+          if (exists) {
+            // Update existing room
+            return prev.map(r => r.id === room.id ? room : r);
+          } else {
+            // Add new room
+            return [...prev, room];
+          }
+        });
+      };
+
+      // Register the callbacks with WorkletContext
       setCallbacks({
-        updateRooms: handleUpdateRooms,
-        updateMessages: handleUpdateMessages,
-        onRoomCreated: handleRoomCreated
+        updateRooms: updateRoomsCallback,
+        updateMessages: updateMessagesCallback,
+        onRoomCreated: roomCreatedCallback
       });
+
+      // Fetch rooms when the component mounts or worklet is initialized
+      refreshRooms();
     }
-  }, [isInitialized, rpcClient]);
+  }, [isInitialized, rpcClient, currentRoom?.id]);
 
   useEffect(() => {
     if (user && user.rooms) {
       setRooms(user.rooms);
     }
   }, [user]);
-
-
-  // Callback handlers for WorkletContext
-  const handleUpdateRooms = useCallback((updatedRooms: Room[]) => {
-    setRooms(updatedRooms);
-  }, []);
-
-
-  useEffect(() => {
-    if (isInitialized && rpcClient) {
-      refreshRooms();
-
-      // Set up callbacks for WorkletContext
-      setCallbacks({
-        updateRooms: handleUpdateRooms,
-        updateMessages: handleUpdateMessages,
-        onRoomCreated: handleRoomCreated
-      });
-    }
-  }, [isInitialized, rpcClient]);
-
-  const handleUpdateMessages = useCallback((newMessages: Message[], replace = false) => {
-    console.log('Handling update messages')
-    if (!newMessages.length) return;
-
-    // Get roomId from the first message
-    const roomId = newMessages[0].roomId;
-
-    setMessagesByRoom(prevByRoom => {
-      const existingMessages = prevByRoom[roomId] || [];
-
-      console.log('Existing messages', existingMessages)
-      let updatedMessages: Message[];
-      if (replace) {
-        // Replace entire message list for this room
-        //
-        updatedMessages = [...newMessages].sort((a, b) => b.timestamp - a.timestamp);
-
-        console.log('Replacing...', updatedMessages)
-      } else {
-        // Merge existing and new messages without duplicates
-        const messageMap = new Map();
-
-        // Add existing messages to map
-        existingMessages.forEach(msg => messageMap.set(msg.id, msg));
-
-        // Add new messages to map
-        newMessages.forEach(msg => messageMap.set(msg.id, msg));
-
-        // Convert back to array and sort
-        updatedMessages = Array.from(messageMap.values())
-          .sort((a, b) => b.timestamp - a.timestamp);
-      }
-
-      // Return updated messagesByRoom
-      return {
-        ...prevByRoom,
-        [roomId]: updatedMessages
-      };
-    });
-
-    // Update hasMoreMessages flag
-    if (newMessages.length < 20) {
-      setHasMoreMessages(false);
-    } else {
-      setHasMoreMessages(true);
-    }
-  }, []);
-
-
-  const handleRoomCreated = useCallback((room: Room) => {
-    setRooms(prev => {
-      // Check if the room already exists
-      const exists = prev.some(r => r.id === room.id);
-      if (exists) {
-        // Update existing room
-        return prev.map(r => r.id === room.id ? room : r);
-      } else {
-        // Add new room
-        return [...prev, room];
-      }
-    });
-  }, []);
 
   // Refresh rooms list from backend
   const refreshRooms = async () => {
@@ -185,12 +178,20 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   };
 
   const selectRoom = async (room: Room) => {
+    console.log('ChatContext: Selecting room', room.id);
     setHasMoreMessages(true); // Reset pagination state
     setCurrentRoom(room);
+
+    // Clear the current messages for the room to avoid showing stale data
+    setMessagesByRoom(prev => ({
+      ...prev,
+      [room.id]: [] // Clear existing messages
+    }));
 
     // Call backend to join room if we have a worklet
     if (rpcClient && isInitialized) {
       try {
+        console.log('ChatContext: Sending joinRoom request to backend', room.id);
         const request = rpcClient.request('joinRoom');
         await request.send(JSON.stringify({ roomId: room.id }));
         // Response will be handled in WorkletContext and will update messages
@@ -246,7 +247,6 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   };
 
   // Load older messages (for pagination)
-
   const loadMoreMessages = async (): Promise<boolean> => {
     if (!currentRoom || !rpcClient || !isInitialized || isLoadingMore || !hasMoreMessages) {
       return false;

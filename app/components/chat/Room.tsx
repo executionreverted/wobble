@@ -20,27 +20,29 @@ import { formatTimestamp } from '../../utils/helpers';
 
 // Message component to render each chat message
 const MessageItem = ({ message, isOwnMessage }: any) => {
+  if (!message) return null;
+
   return (
     <View style={[
       styles.messageContainer,
       isOwnMessage ? styles.ownMessageContainer : styles.otherMessageContainer
     ]}>
       {!isOwnMessage && (
-        <Text style={styles.messageSender}>{message.sender}</Text>
+        <Text style={styles.messageSender}>{message.sender || 'Unknown'}</Text>
       )}
 
       <View style={[
         styles.messageContent,
         isOwnMessage ? styles.ownMessageContent : styles.otherMessageContent
       ]}>
-        <Text style={styles.messageText}>{message.content}</Text>
+        <Text style={styles.messageText}>{message.content || ''}</Text>
       </View>
 
       <Text style={[
         styles.messageTimestamp,
         isOwnMessage ? styles.ownMessageTimestamp : styles.otherMessageTimestamp
       ]}>
-        {formatTimestamp(message.timestamp)}
+        {formatTimestamp(message.timestamp || Date.now())}
       </Text>
     </View>
   );
@@ -48,11 +50,13 @@ const MessageItem = ({ message, isOwnMessage }: any) => {
 
 // System message component
 const SystemMessage = ({ message }: any) => {
+  if (!message) return null;
+
   return (
     <View style={styles.systemMessageContainer}>
-      <Text style={styles.systemMessageText}>{message.content}</Text>
+      <Text style={styles.systemMessageText}>{message.content || ''}</Text>
       <Text style={styles.systemMessageTimestamp}>
-        {formatTimestamp(message.timestamp)}
+        {formatTimestamp(message.timestamp || Date.now())}
       </Text>
     </View>
   );
@@ -79,10 +83,26 @@ const EnhancedChatRoom = () => {
   const insets = useSafeAreaInsets();
   const flatListRef = useRef(null);
 
-
+  // Add debug logging for messages
   useEffect(() => {
-    console.log("Messages in Room component:", messages, currentRoom);
-  }, [messages]);
+    console.log("Room component: Messages updated", {
+      count: messages?.length || 0,
+      currentRoomId: currentRoom?.id || 'no room selected'
+    });
+
+    if (messages && messages.length > 0) {
+      // Log the first message to debug format issues
+      console.log("First message sample:", JSON.stringify(messages[0]));
+    } else {
+      console.log("No messages to display");
+    }
+  }, [messages, currentRoom]);
+
+  // Debug logging for current room
+  useEffect(() => {
+    console.log("Room component: Current room updated", currentRoom?.id || 'no room');
+  }, [currentRoom]);
+
   // Set room name in header
   useEffect(() => {
     if (currentRoom) {
@@ -116,13 +136,18 @@ const EnhancedChatRoom = () => {
 
   // Function to render each message
   const renderItem = ({ item }: any) => {
+    if (!item) {
+      console.warn('Undefined message in renderItem');
+      return null;
+    }
+
     // If the message is a system message
     if (item.system) {
       return <SystemMessage message={item} />;
     }
 
     // Check if the message is from the current user
-    const isOwnMessage = user && item.sender === user.name;
+    const isOwnMessage = user && user.name && item.sender === user.name;
 
     return (
       <MessageItem
@@ -131,6 +156,28 @@ const EnhancedChatRoom = () => {
       />
     );
   };
+
+  // Define the empty component with debug info
+  const EmptyMessagesList = () => (
+    <View style={styles.emptyContainer}>
+      <MaterialIcons name="forum" size={48} color={COLORS.textMuted} />
+      <Text style={styles.emptyText}>
+        {currentRoom
+          ? `No messages yet in ${currentRoom.name}. Be the first to send a message!`
+          : 'No room selected'}
+      </Text>
+
+      {/* Debug info - you can remove this in production */}
+      <View style={{ marginTop: 20, padding: 10, backgroundColor: COLORS.tertiaryBackground }}>
+        <Text style={{ color: COLORS.textMuted, fontSize: 12 }}>
+          Debug Info: {"\n"}
+          Room ID: {currentRoom?.id || 'none'}{"\n"}
+          Messages: {messages?.length || 0}{"\n"}
+          User: {user?.name || 'none'}
+        </Text>
+      </View>
+    </View>
+  );
 
   // Function to load more messages (previous/older messages)
   const handleLoadMore = useCallback(() => {
@@ -173,18 +220,13 @@ const EnhancedChatRoom = () => {
         ref={flatListRef}
         data={messages}
         renderItem={renderItem}
-        keyExtractor={(item) => item.id}
+        keyExtractor={(item) => item?.id || `fallback-${Math.random()}`}
         contentContainerStyle={styles.messagesList}
         inverted={true} // Display newest messages at the bottom
         onEndReached={handleLoadMore}
         onEndReachedThreshold={0.5}
         ListFooterComponent={renderFooter}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <MaterialIcons name="forum" size={48} color={COLORS.textMuted} />
-            <Text style={styles.emptyText}>No messages yet. Be the first to send a message!</Text>
-          </View>
-        }
+        ListEmptyComponent={EmptyMessagesList}
       />
 
       <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 10) }]}>

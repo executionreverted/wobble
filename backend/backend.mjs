@@ -485,11 +485,13 @@ const initializeUserRooms = async () => {
 // Initialize an existing room
 const initializeRoom = async (roomData) => {
   try {
-    // Extract roomId from the room data
-    const roomId = roomData.id;
+    // roomData can be either a string roomId or a room object
+    const roomId = typeof roomData === 'string' ? roomData : roomData.id;
+    console.log(`Initializing room: ${roomId}`);
 
     // If the room is already initialized, return it
     if (roomBases[roomId]) {
+      console.log(`Room ${roomId} already initialized`);
       return roomBases[roomId];
     }
 
@@ -500,8 +502,6 @@ const initializeRoom = async (roomData) => {
       console.log(`Room directory does not exist, creating: ${roomDir}`);
       fs.mkdirSync(roomDir, { recursive: true });
     }
-
-    console.log(`Initializing room: ${roomId} (${roomData.name})`);
 
     // Create corestore for the room
     const roomCorestore = new Corestore(roomDir);
@@ -514,23 +514,30 @@ const initializeRoom = async (roomData) => {
     const blobStore = new Hyperblobs(blobCore);
     await blobStore.ready();
 
-    // Create the room instance - use stored key and encryption key
-    const roomOptions = {
+    // Create the room instance - use stored key and encryption key if available
+    let roomOptions = {
       blobCore,
-      blobStore,
-      roomId: roomData.id,
-      roomName: roomData.name
+      blobStore
     };
 
-    // If we have the encryption key and room key, use them
-    if (roomData.key && roomData.encryptionKey) {
-      roomOptions.key = Buffer.from(roomData.key, 'hex');
-      roomOptions.encryptionKey = Buffer.from(roomData.encryptionKey, 'hex');
+    // If we have full room data (not just an ID)
+    if (typeof roomData === 'object') {
+      roomOptions.roomId = roomData.id;
+      roomOptions.roomName = roomData.name;
+
+      // If we have the encryption key and room key, use them
+      if (roomData.key && roomData.encryptionKey) {
+        console.log(`Using stored keys for room ${roomId}`);
+        roomOptions.key = Buffer.from(roomData.key, 'hex');
+        roomOptions.encryptionKey = Buffer.from(roomData.encryptionKey, 'hex');
+      }
     }
 
     // Create the room instance
+    console.log(`Creating RoomBase instance for ${roomId}`, roomOptions);
     const room = new RoomBase(roomCorestore, roomOptions);
     await room.ready();
+    console.log(`Room ${roomId} is ready`);
 
     // Set up message listener if not already set
     if (!room._hasMessageListener) {
@@ -538,14 +545,14 @@ const initializeRoom = async (roomData) => {
         // Format the message
         const formattedMessage = {
           id: msg.id,
-          roomId: roomId,
+          roomId: roomId, // Make sure roomId is included
           content: msg.content,
           sender: msg.sender,
           timestamp: msg.timestamp,
           system: msg.system || false
         };
 
-        console.log('RECEIVED NEW MESSAGE:', formattedMessage);
+        console.log(`New message in room ${roomId}:`, formattedMessage.id);
 
         // Send to client
         const req = rpc.request('newMessage');
@@ -556,6 +563,7 @@ const initializeRoom = async (roomData) => {
       });
 
       room._hasMessageListener = true;
+      console.log(`Message listener set up for room ${roomId}`);
     }
 
     // Store the instances
@@ -565,13 +573,13 @@ const initializeRoom = async (roomData) => {
     console.log(`Room ${roomId} initialized successfully`);
     return room;
   } catch (error) {
-    console.error(`Error initializing room ${roomData.id} (${roomData.name}):`, error);
+    console.error(`Error initializing room:`, error);
     return null;
   }
 };
 
 
-
+// Also update the getMessagesFromRoom function for better message formatting:
 const getMessagesFromRoom = async (room, roomId, options = {}) => {
   const { limit = 50, reverse = true, before = null, after = null } = options;
 
@@ -590,6 +598,8 @@ const getMessagesFromRoom = async (room, roomId, options = {}) => {
     if (after !== null) {
       queryOptions.gt = { timestamp: after };
     }
+
+    console.log(`Getting messages for room ${roomId} with options:`, queryOptions);
 
     // Get messages
     const messageStream = room.getMessages(queryOptions);
@@ -615,18 +625,23 @@ const getMessagesFromRoom = async (room, roomId, options = {}) => {
       messages = messageStream;
     }
 
+    console.log(`Retrieved ${messages.length} messages from room ${roomId}`);
+
     // Format messages with roomId
-    return messages.map(msg => ({
-      id: msg.id,
+    const formattedMessages = messages.map(msg => ({
+      id: msg.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       roomId: roomId,
-      content: msg.content,
-      sender: msg.sender,
-      timestamp: msg.timestamp,
+      content: msg.content || "",
+      sender: msg.sender || "Unknown",
+      timestamp: msg.timestamp || Date.now(),
       system: msg.system || false,
       // Include attachments if present
       hasAttachments: msg.hasAttachments || false,
       attachments: msg.attachments || null
     }));
+
+    console.log(`Formatted ${formattedMessages.length} messages with roomId ${roomId}`);
+    return formattedMessages;
 
   } catch (error) {
     console.error('Error getting messages from room:', error);
@@ -634,21 +649,51 @@ const getMessagesFromRoom = async (room, roomId, options = {}) => {
   }
 };
 
+// Also update the joinRoom function for better error handling:
 const joinRoom = async (roomId) => {
   try {
+    console.log(`Joining room: ${roomId}`);
+
+    if (!roomId) {
+      throw new Error('No roomId provided');
+    }
+
     // Initialize the room if needed
     let room = roomBases[roomId];
     if (!room) {
+      console.log(`Room ${roomId} not initialized yet, looking up room data...`);
+
       // Find the room data in user's rooms
       const ub = await initializeUserBase();
+      if (!ub) {
+        throw new Error('UserBase not initialized');
+      }
+
       await ub.ready();
       const userData = await ub.getUserData();
 
-      const roomData = userData.rooms.find(r => r.id === roomId);
+      if (!userData || !userData.rooms) {
+        throw new Error('User data not available or no rooms found');
+      }
+
+      // Find the room data
+      let roomData = null;
+      if (typeof userData.rooms === 'string') {
+        try {
+          const parsedRooms = JSON.parse(userData.rooms);
+          roomData = parsedRooms.find(r => r.id === roomId);
+        } catch (e) {
+          console.error('Error parsing rooms from user data:', e);
+        }
+      } else if (Array.isArray(userData.rooms)) {
+        roomData = userData.rooms.find(r => r.id === roomId);
+      }
+
       if (!roomData) {
         throw new Error(`Room ${roomId} not found in user data`);
       }
 
+      console.log(`Found room data:`, roomData);
       room = await initializeRoom(roomData);
       if (!room) {
         throw new Error(`Failed to initialize room: ${roomId}`);
@@ -656,9 +701,11 @@ const joinRoom = async (roomId) => {
     }
 
     await room.ready();
+    console.log(`Room ${roomId} is ready`);
 
     // Get recent messages
     const messages = await getMessagesFromRoom(room, roomId, { limit: 50 });
+    console.log(`Retrieved ${messages.length} messages from room ${roomId}`);
 
     // Send response with messages
     const response = {
@@ -667,6 +714,7 @@ const joinRoom = async (roomId) => {
       messages
     };
 
+    console.log(`Sending ${messages.length} messages to client for room ${roomId}`);
     const req = rpc.request('roomMessages');
     req.send(JSON.stringify(response));
 
@@ -683,7 +731,6 @@ const joinRoom = async (roomId) => {
     req.send(JSON.stringify(response));
   }
 };
-
 // Leave a room (cleanup)
 const leaveRoom = async (roomId) => {
   try {
