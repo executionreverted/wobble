@@ -9,11 +9,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Keyboard
+  Keyboard,
+  Alert
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
 import { useChat } from '../../hooks/useChat';
 import { COLORS } from '../../utils/constants';
 import useUser from '../../hooks/useUser';
@@ -101,6 +104,25 @@ const EnhancedChatRoom = () => {
     setShowAttachmentOptions(prev => !prev);
   };
 
+  // Request permissions on component mount
+  useEffect(() => {
+    (async () => {
+      if (Platform.OS !== 'web') {
+        // Request media library permissions
+        const mediaLibraryPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (mediaLibraryPermission.status !== 'granted') {
+          console.log('Media library permission not granted');
+        }
+
+        // Request camera permissions
+        const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
+        if (cameraPermission.status !== 'granted') {
+          console.log('Camera permission not granted');
+        }
+      }
+    })();
+  }, []);
+
   // Add keyboard listeners to track keyboard visibility
   useEffect(() => {
     const keyboardWillShowListener = Keyboard.addListener(
@@ -140,6 +162,95 @@ const EnhancedChatRoom = () => {
       setInputHeight(44); // Reset input height to single line
     } catch (error) {
       console.error('Error sending message:', error);
+    }
+  };
+
+  // Function to handle photo selection
+  const handleSelectPhoto = async () => {
+    setShowAttachmentOptions(false);
+
+    try {
+      let result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 0.8,
+        allowsMultipleSelection: false,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const selectedAsset = result.assets[0];
+        console.log('Selected photo:', {
+          uri: selectedAsset.uri,
+          type: selectedAsset.mimeType || 'image/jpeg',
+          name: selectedAsset.fileName || 'photo.jpg',
+          size: selectedAsset.fileSize || 0,
+        });
+
+        // Here you'd typically upload the file or attach it to a message
+        // For now we're just logging it
+        Alert.alert('Photo Selected', `File: ${selectedAsset.fileName || 'photo.jpg'}`);
+      }
+    } catch (error) {
+      console.error('Error selecting photo:', error);
+      Alert.alert('Error', 'Failed to select photo');
+    }
+  };
+
+  // Function to handle document selection
+  const handleSelectDocument = async () => {
+    setShowAttachmentOptions(false);
+
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*', // All file types
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled === false && result.assets && result.assets.length > 0) {
+        const file = result.assets[0];
+        console.log('Selected file:', {
+          uri: file.uri,
+          type: file.mimeType,
+          name: file.name,
+          size: file.size,
+        });
+
+        // Here you'd typically upload the file or attach it to a message
+        // For now we're just logging it
+        Alert.alert('File Selected', `File: ${file.name}, Size: ${(file.size / 1024).toFixed(2)} KB`);
+      }
+    } catch (error) {
+      console.error('Error selecting document:', error);
+      Alert.alert('Error', 'Failed to select document');
+    }
+  };
+
+  // Function to handle camera capture
+  const handleCameraCapture = async () => {
+    setShowAttachmentOptions(false);
+
+    try {
+      let result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: false,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const selectedAsset = result.assets[0];
+        console.log('Camera capture:', {
+          uri: selectedAsset.uri,
+          type: selectedAsset.mimeType || 'image/jpeg',
+          name: 'camera_photo.jpg',
+          size: selectedAsset.fileSize || 0,
+        });
+
+        // Here you'd typically upload the file or attach it to a message
+        Alert.alert('Photo Captured', 'Camera photo captured successfully');
+      }
+    } catch (error) {
+      console.error('Error capturing photo:', error);
+      Alert.alert('Error', 'Failed to capture photo');
     }
   };
 
@@ -235,23 +346,25 @@ const EnhancedChatRoom = () => {
               onPress={toggleAttachmentOptions}
             />
             <View style={styles.attachmentOptions}>
-              <TouchableOpacity style={styles.attachmentOption}>
+              <TouchableOpacity style={styles.attachmentOption} onPress={handleSelectPhoto}>
                 <View style={[styles.attachmentIconWrapper, { backgroundColor: '#4caf50' }]}>
                   <MaterialIcons name="photo" size={24} color="#fff" />
                 </View>
                 <Text style={styles.attachmentText}>Photo</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.attachmentOption}>
+
+              <TouchableOpacity style={styles.attachmentOption} onPress={handleCameraCapture}>
                 <View style={[styles.attachmentIconWrapper, { backgroundColor: '#2196f3' }]}>
-                  <MaterialIcons name="videocam" size={24} color="#fff" />
+                  <MaterialIcons name="camera-alt" size={24} color="#fff" />
                 </View>
-                <Text style={styles.attachmentText}>Video</Text>
+                <Text style={styles.attachmentText}>Camera</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.attachmentOption}>
+
+              <TouchableOpacity style={styles.attachmentOption} onPress={handleSelectDocument}>
                 <View style={[styles.attachmentIconWrapper, { backgroundColor: '#ff9800' }]}>
                   <MaterialIcons name="insert-drive-file" size={24} color="#fff" />
                 </View>
-                <Text style={styles.attachmentText}>File</Text>
+                <Text style={styles.attachmentText}>Document</Text>
               </TouchableOpacity>
             </View>
           </>
