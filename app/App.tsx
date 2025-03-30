@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text } from 'react-native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MaterialIcons } from '@expo/vector-icons';
-
+import { AppState } from 'react-native';
 import WelcomeScreen from './components/Welcome';
 import LoginScreen from './components/auth/Login';
 import HomeScreen from './components/Home';
@@ -68,7 +67,7 @@ const AppNavigator = () => {
   const { user } = useUser();
   const isAuthenticated = !!user;
 
-  const { isInitialized, isLoading, isBackendReady } = useWorklet();
+  const { isInitialized, isLoading, isBackendReady, reinitializeBackend } = useWorklet();
   const [appReady, setAppReady] = useState(false);
 
   // Wait for worklet initialization to complete
@@ -82,6 +81,25 @@ const AppNavigator = () => {
       return () => clearTimeout(timer);
     }
   }, [isInitialized, isLoading]);
+
+
+  useEffect(() => {
+    const handleAppStateChange = async (nextAppState: string) => {
+      if (nextAppState === 'active' && !isLoading && isInitialized && isBackendReady) {
+        // App came to foreground, reinitialize backend to ensure clean state
+        console.log('App came to foreground, reinitializing backend...');
+        await reinitializeBackend();
+      }
+    };
+
+    // Subscribe to app state changes
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+    return () => {
+      subscription.remove();
+    };
+  }, [isInitialized, isBackendReady, isLoading, reinitializeBackend]);
+
 
   // Show loader if app is not ready yet
   if (!appReady) {

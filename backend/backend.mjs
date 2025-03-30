@@ -112,6 +112,12 @@ const rpc = new RPC(IPC, (req, error) => {
     teardown()
   }
 
+
+  // Add this to your RPC command handlers:
+  if (req.command === 'reinitialize') {
+    reinitializeBackend();
+  }
+
   if (req.command === 'generateSeed') {
     sendSeed()
   }
@@ -312,6 +318,8 @@ const checkExistingUser = async () => {
  *************************/
 
 // Create a new room
+// Fix for the createRoom function in backend.mjs
+
 const createRoom = async (roomData) => {
   try {
     // First ensure UserBase is initialized
@@ -370,11 +378,27 @@ const createRoom = async (roomData) => {
     };
 
     // Add this room to the user's rooms list
-    const userRooms = Array.isArray(user.rooms) ? [...user.rooms] : [];
+    let userRooms = [];
+    if (user.rooms) {
+      // Parse existing rooms if it's a string
+      if (typeof user.rooms === 'string') {
+        try {
+          userRooms = JSON.parse(user.rooms);
+        } catch (e) {
+          console.error('Error parsing user.rooms:', e);
+          userRooms = [];
+        }
+      } else if (Array.isArray(user.rooms)) {
+        userRooms = [...user.rooms];
+      }
+    }
+
     userRooms.push(newRoom);
 
-    // Update the user profile with the new rooms list
-    await ub.updateUserProfile({ rooms: userRooms });
+    // Update the user profile with the new rooms list - convert to string for storage
+    await ub.updateUserProfile({
+      rooms: JSON.stringify(userRooms)
+    });
 
     // Get updated user data
     const updatedUser = await ub.getUserData();
@@ -403,7 +427,6 @@ const createRoom = async (roomData) => {
     req.send(JSON.stringify(response));
   }
 };
-
 // Initialize an existing room
 const initializeRoom = async (roomId) => {
   try {
@@ -616,42 +639,111 @@ const getRooms = async () => {
   }
 };
 
-const teardown = async () => {
-  console.log('Tearing down backend...');
+
+// Clean up all resources properly
+const cleanupResources = async () => {
+  console.log('Cleaning up all resources...');
 
   // Close all room instances
   for (const roomId in roomBases) {
     try {
-      await roomBases[roomId]?.close?.();
-      await roomCorestores[roomId]?.close?.();
+      if (roomBases[roomId]) {
+        console.log(`Closing room: ${roomId}`);
+        await roomBases[roomId].close().catch(err => {
+          console.error(`Error closing room ${roomId}:`, err);
+        });
+      }
+
+      if (roomCorestores[roomId]) {
+        await roomCorestores[roomId].close().catch(err => {
+          console.error(`Error closing room corestore ${roomId}:`, err);
+        });
+      }
     } catch (err) {
-      console.error(`Error closing room ${roomId}:`, err);
+      console.error(`Error during room cleanup for ${roomId}:`, err);
     }
   }
 
-  // Clear room dictionaries
+  // Reset room collections
   roomBases = {};
   roomCorestores = {};
 
   // Close user resources
   if (userBase) {
     try {
-      await userBase?.close?.();
+      console.log('Closing userBase...');
+      await userBase.close().catch(err => {
+        console.error('Error closing userBase:', err);
+      });
+      userBase = null;
     } catch (err) {
-      console.error('Error closing userBase:', err);
+      console.error('Error during userBase cleanup:', err);
     }
   }
 
   if (userCorestore) {
     try {
-      await userCorestore?.close?.();
+      console.log('Closing userCorestore...');
+      await userCorestore.close().catch(err => {
+        console.error('Error closing userCorestore:', err);
+      });
+      userCorestore = null;
     } catch (err) {
-      console.error('Error closing userCorestore:', err);
+      console.error('Error during userCorestore cleanup:', err);
     }
   }
 
-  console.log('Backend teardown complete');
+  console.log('Resource cleanup complete');
 }
+
+// Reinitialize backend after cleanup
+const reinitializeBackend = async () => {
+  console.log('Reinitializing backend...');
+
+  // Clean up existing resources first
+  await cleanupResources();
+
+  // Reinitialize user if account exists
+  if (hasAccount()) {
+    try {
+      console.log('Reinitializing user account...');
+      await initializeUserBase();
+
+      // Notify client that backend is ready
+      const req = rpc.request('backendInitialized');
+      req.send(JSON.stringify({ success: true }));
+
+      // If user was initialized, also send user data
+      if (userBase) {
+        const userData = await userBase.getUserData();
+        const userReq = rpc.request('userInfo');
+        userReq.send(JSON.stringify(userData));
+      }
+    } catch (err) {
+      console.error('Error reinitializing user account:', err);
+      const req = rpc.request('backendInitialized');
+      req.send(JSON.stringify({
+        success: false,
+        error: err.message || 'Failed to initialize user account'
+      }));
+    }
+  } else {
+    // Just notify that backend is ready
+    const req = rpc.request('backendInitialized');
+    req.send(JSON.stringify({ success: true }));
+  }
+
+  console.log('Backend reinitialization complete');
+}
+
+// Enhanced teardown function
+const teardown = async () => {
+  console.log('Performing teardown...');
+  await cleanupResources();
+  console.log('Teardown complete');
+}
+
+
 
 // Initialize UserBase at startup if account exists
 (async () => {

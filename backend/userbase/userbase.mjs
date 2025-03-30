@@ -283,16 +283,46 @@ class UserBase extends ReadyResource {
   }
 
   // Method to get user data in a structured format
+  // Method to get user data in a structured format
   async getUserData() {
     await this.ready();
+
+    // Parse string arrays into actual arrays
+    let roomsArray = [];
+    try {
+      if (this.userRooms) {
+        if (typeof this.userRooms === 'string') {
+          roomsArray = JSON.parse(this.userRooms);
+        } else if (Array.isArray(this.userRooms)) {
+          roomsArray = this.userRooms;
+        }
+      }
+    } catch (e) {
+      console.error('Error parsing rooms in getUserData:', e);
+      roomsArray = [];
+    }
+
+    let contactsArray = [];
+    try {
+      if (this.userContacts) {
+        if (typeof this.userContacts === 'string') {
+          contactsArray = JSON.parse(this.userContacts);
+        } else if (Array.isArray(this.userContacts)) {
+          contactsArray = this.userContacts;
+        }
+      }
+    } catch (e) {
+      console.error('Error parsing contacts in getUserData:', e);
+      contactsArray = [];
+    }
 
     return {
       id: this.userPubKey,
       name: this.userName,
       status: this.userStatus,
       seed: this.userSeed,
-      contacts: this.userContacts,
-      rooms: this.userRooms
+      contacts: contactsArray,
+      rooms: roomsArray
     };
   }
 
@@ -384,8 +414,8 @@ class UserBase extends ReadyResource {
 
 
   /**
-   * New method to update user profile in UserBase class
-   */
+  * Updated method to update user profile in UserBase class
+  */
   async updateUserProfile(profileData) {
     if (!this.base || !this.userPubKey) {
       return { success: false, error: 'User not initialized' };
@@ -407,6 +437,21 @@ class UserBase extends ReadyResource {
         status: profileData.status !== undefined ? profileData.status : existingUser.status
       };
 
+      // Handle special fields that need to be JSON strings in the database
+      if (profileData.rooms !== undefined) {
+        // If rooms is already a string, use it directly, otherwise stringify it
+        updatedUser.rooms = typeof profileData.rooms === 'string'
+          ? profileData.rooms
+          : JSON.stringify(profileData.rooms);
+      }
+
+      if (profileData.contacts !== undefined) {
+        // If contacts is already a string, use it directly, otherwise stringify it
+        updatedUser.contacts = typeof profileData.contacts === 'string'
+          ? profileData.contacts
+          : JSON.stringify(profileData.contacts);
+      }
+
       // Dispatch the profile update
       const dispatchData = dispatch('@userbase/set-metadata', updatedUser);
       await this.base.append(dispatchData);
@@ -415,6 +460,21 @@ class UserBase extends ReadyResource {
       this.userName = updatedUser.name;
       this.userStatus = updatedUser.status;
 
+      // Update local arrays from their string representation
+      try {
+        this.userRooms = updatedUser.rooms ? JSON.parse(updatedUser.rooms) : [];
+      } catch (e) {
+        console.error('Error parsing rooms:', e);
+        this.userRooms = [];
+      }
+
+      try {
+        this.userContacts = updatedUser.contacts ? JSON.parse(updatedUser.contacts) : [];
+      } catch (e) {
+        console.error('Error parsing contacts:', e);
+        this.userContacts = [];
+      }
+
       console.log('Updated user profile:', this.userPubKey);
       return { success: true };
     } catch (error) {
@@ -422,7 +482,6 @@ class UserBase extends ReadyResource {
       return { success: false, error: error.message || 'Failed to update profile' };
     }
   }
-
   async getUserInfo() {
     try {
       return await this.base.view.findOne('@userbase/metadata', {});
