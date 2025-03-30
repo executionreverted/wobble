@@ -6,6 +6,8 @@ import RPC from 'bare-rpc';
 import bundle from '../app.bundle';
 import b4a from "b4a"
 import useUser from '../hooks/useUser';
+import { Room, Message } from '../types';
+
 export interface WorkletContextType {
   worklet: Worklet | null;
   rpcClient: any;
@@ -14,7 +16,15 @@ export interface WorkletContextType {
   error: Error | null;
   generateSeedPhrase: () => Promise<string[]>;
   confirmSeedPhrase: (seed: string) => any;
-  checkExistingUser: () => {}
+  checkExistingUser: () => Promise<{ exists: boolean, user?: any, error?: string }>;
+  updateRooms?: (rooms: Room[]) => void;
+  updateMessages?: (messages: Message[]) => void;
+  onRoomCreated?: (room: Room) => void;
+  setCallbacks: (callbacks: {
+    updateRooms?: (rooms: Room[]) => void;
+    updateMessages?: (messages: Message[]) => void;
+    onRoomCreated?: (room: Room) => void;
+  }) => void;
 }
 
 export const WorkletContext = createContext<WorkletContextType>(undefined as any);
@@ -24,12 +34,17 @@ export interface WorkletProviderProps {
 }
 
 export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) => {
-  const { updateUser, storeSeedPhrase } = useUser()
+  const { updateUser, storeSeedPhrase } = useUser();
   const [worklet, setWorklet] = useState<Worklet | null>(null);
   const [rpcClient, setRpcClient] = useState<any>(null);
   const [isInitialized, setIsInitialized] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+
+  // Callbacks for updating rooms and messages - will be set by ChatContext
+  const [updateRooms, setUpdateRooms] = useState<((rooms: Room[]) => void) | undefined>(undefined);
+  const [updateMessages, setUpdateMessages] = useState<((messages: Message[]) => void) | undefined>(undefined);
+  const [onRoomCreated, setOnRoomCreated] = useState<((room: Room) => void) | undefined>(undefined);
 
   // Initialize worklet on component mount
   useEffect(() => {
@@ -40,7 +55,6 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
         const newWorklet = new Worklet();
         newWorklet.start('/app.bundle', bundle, [Platform.OS]);
 
-
         // Initialize RPC client
         const { IPC } = newWorklet;
         const client = new RPC(
@@ -48,52 +62,112 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
           (req: any) => {
             if (req.command === 'seedGenerated') {
               try {
-                const data = b4a.toString(req.data)
-                const parsedData = JSON.parse(data)
-                console.log(parsedData)
-                storeSeedPhrase(parsedData)
+                const data = b4a.toString(req.data);
+                const parsedData = JSON.parse(data);
+                console.log('Seed generated:', parsedData);
+                storeSeedPhrase(parsedData);
               }
               catch (e) {
-                console.error(e)
+                console.error('Error handling seedGenerated:', e);
               }
             }
 
             if (req.command === 'userInfo') {
-              const data = b4a.toString(req.data)
-              const parsedData = JSON.parse(data)
-              console.log(parsedData)
-              updateUser(parsedData)
+              try {
+                const data = b4a.toString(req.data);
+                const parsedData = JSON.parse(data);
+                console.log('User info received:', parsedData);
+                updateUser(parsedData);
+              } catch (e) {
+                console.error('Error handling userInfo:', e);
+              }
             }
 
             if (req.command === 'userCheckResult') {
               try {
-                const data = b4a.toString(req.data)
-                const parsedData = JSON.parse(data)
-                console.log('User check result:', parsedData)
+                const data = b4a.toString(req.data);
+                const parsedData = JSON.parse(data);
+                console.log('User check result:', parsedData);
 
                 if (parsedData.exists && parsedData.user) {
-                  updateUser(parsedData.user)
+                  updateUser(parsedData.user);
                 }
               } catch (e) {
-                console.error('Error handling userCheckResult:', e)
+                console.error('Error handling userCheckResult:', e);
               }
             }
 
             if (req.command === 'profileUpdated') {
               try {
-                const data = b4a.toString(req.data)
-                const parsedData = JSON.parse(data)
-                console.log('Profile update result:', parsedData)
+                const data = b4a.toString(req.data);
+                const parsedData = JSON.parse(data);
+                console.log('Profile update result:', parsedData);
 
                 if (parsedData.success && parsedData.user) {
-                  updateUser(parsedData.user)
+                  updateUser(parsedData.user);
                 }
               } catch (e) {
-                console.error('Error handling profileUpdated:', e)
+                console.error('Error handling profileUpdated:', e);
               }
             }
 
+            // Handle room-related RPC responses
+            if (req.command === 'roomsList') {
+              try {
+                const data = b4a.toString(req.data);
+                const parsedData = JSON.parse(data);
+                console.log('Rooms list received:', parsedData);
 
+                if (updateRooms && Array.isArray(parsedData.rooms)) {
+                  updateRooms(parsedData.rooms);
+                }
+              } catch (e) {
+                console.error('Error handling roomsList:', e);
+              }
+            }
+
+            if (req.command === 'roomCreated') {
+              try {
+                const data = b4a.toString(req.data);
+                const parsedData = JSON.parse(data);
+                console.log('Room created:', parsedData);
+
+                if (parsedData.success && parsedData.room && onRoomCreated) {
+                  onRoomCreated(parsedData.room);
+                }
+              } catch (e) {
+                console.error('Error handling roomCreated:', e);
+              }
+            }
+
+            if (req.command === 'roomMessages') {
+              try {
+                const data = b4a.toString(req.data);
+                const parsedData = JSON.parse(data);
+                console.log('Room messages received:', parsedData);
+
+                if (updateMessages && Array.isArray(parsedData.messages)) {
+                  updateMessages(parsedData.messages);
+                }
+              } catch (e) {
+                console.error('Error handling roomMessages:', e);
+              }
+            }
+
+            if (req.command === 'newMessage') {
+              try {
+                const data = b4a.toString(req.data);
+                const parsedData = JSON.parse(data);
+                console.log('New message received:', parsedData);
+
+                if (updateMessages && parsedData.message) {
+                  // Add the new message to the existing messages
+                  updateMessages([parsedData.message]);
+                }
+              } catch (e) {
+                console.error('Error handling newMessage:', e);
+              }
+            }
           }
         );
 
@@ -104,12 +178,13 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
 
         setTimeout(() => {
           const checkUserRequest = client.request('checkUserExists');
-          checkUserRequest.send("")
-          setIsLoading(false)
+          checkUserRequest.send("");
+          setIsLoading(false);
         }, 500);
       } catch (err) {
         console.error('Failed to initialize worklet:', err);
         setError(err instanceof Error ? err : new Error('Unknown error initializing worklet'));
+        setIsLoading(false);
       }
     };
 
@@ -119,8 +194,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     return () => {
       if (worklet) {
         if (rpcClient) {
-          const req = rpcClient.request('teardown')
-          req.send("")
+          const req = rpcClient.request('teardown');
+          req.send("");
         }
         worklet.terminate();
       }
@@ -140,7 +215,6 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       throw err instanceof Error ? err : new Error('Failed to generate seed phrase');
     }
   }, [rpcClient]);
-
 
   const confirmSeedPhrase = useCallback(async (seedPhrase: string[]): Promise<{ success: boolean, userId?: string, error?: string }> => {
     if (!rpcClient) {
@@ -184,7 +258,16 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     }
   }, [rpcClient]);
 
-
+  // Set callback functions from ChatContext
+  const setCallbacks = useCallback((callbacks: {
+    updateRooms?: (rooms: Room[]) => void,
+    updateMessages?: (messages: Message[]) => void,
+    onRoomCreated?: (room: Room) => void
+  }) => {
+    if (callbacks.updateRooms) setUpdateRooms(() => callbacks.updateRooms);
+    if (callbacks.updateMessages) setUpdateMessages(() => callbacks.updateMessages);
+    if (callbacks.onRoomCreated) setOnRoomCreated(() => callbacks.onRoomCreated);
+  }, []);
 
   const value = {
     worklet,
@@ -194,7 +277,11 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     generateSeedPhrase,
     confirmSeedPhrase,
     checkExistingUser,
-    rpcClient
+    rpcClient,
+    updateRooms,
+    updateMessages,
+    onRoomCreated,
+    setCallbacks
   };
 
   return (
@@ -202,6 +289,6 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       {children}
     </WorkletContext.Provider>
   );
-};
+}
 
-export default WorkletProvider
+export default WorkletContext

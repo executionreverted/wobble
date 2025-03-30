@@ -13,7 +13,7 @@ import crypto from 'bare-crypto';
 import { getEncoding } from './spec/hyperdispatch/messages.mjs';
 import fs from 'bare-fs';
 import path from 'bare-path';
-import { sanitizeTextForTerminal } from './utils.mjs';
+import { sanitizeTextForTerminal } from '../utils.mjs';
 import Hypercore from 'hypercore';
 
 

@@ -8,6 +8,8 @@ export type Room = {
   id: string;
   name: string;
   description: string;
+  createdAt?: number;
+  messageCount?: number;
 };
 
 export type Message = {
@@ -36,6 +38,8 @@ export type ChatContextType = {
   selectRoom: (room: Room) => Promise<void>;
   leaveRoom: () => void;
   sendMessage: (text: string) => Promise<void>;
+  refreshRooms: () => Promise<void>;
+  createRoom: (name: string, description: string) => Promise<{ success: boolean, roomId: string }>;
 };
 
 export type SeedPhraseResponse = string[];

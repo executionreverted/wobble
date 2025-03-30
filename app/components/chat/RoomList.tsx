@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, TextInput, Alert } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,14 +7,24 @@ import { useChat } from '../../hooks/useChat';
 import { Room } from '../../types';
 import { COLORS } from '../../utils/constants';
 import { filterRooms } from '../../utils/helpers';
+import CreateRoomModal from './CreateRoomModal';
 
 const RoomListScreen = () => {
-  const { rooms, selectRoom } = useChat();
+  const { rooms, selectRoom, refreshRooms, createRoom } = useChat();
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredRooms, setFilteredRooms] = useState<Room[]>(rooms);
+  const [createModalVisible, setCreateModalVisible] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
 
+  useEffect(() => {
+    // Load rooms when component mounts
+    setIsLoading(true);
+    refreshRooms().finally(() => setIsLoading(false));
+  }, []);
+
+  // Filter rooms when search query or rooms list changes
   useEffect(() => {
     setFilteredRooms(filterRooms(rooms, searchQuery));
   }, [rooms, searchQuery]);
@@ -26,8 +36,28 @@ const RoomListScreen = () => {
   };
 
   const handleCreateRoom = () => {
-    // Would normally navigate to create room screen
-    console.log('Create room pressed');
+    setCreateModalVisible(true);
+  };
+
+  const handleRoomCreated = async (roomName: string, roomDescription: string) => {
+    setIsLoading(true);
+    try {
+      const result = await createRoom(roomName, roomDescription);
+
+      if (result.success) {
+        // Wait a moment for backend to update, then refresh the list
+        setTimeout(() => {
+          refreshRooms().finally(() => setIsLoading(false));
+        }, 500);
+      } else {
+        Alert.alert('Error', 'Failed to create room. Please try again.');
+        setIsLoading(false);
+      }
+    } catch (error) {
+      console.error('Error creating room:', error);
+      Alert.alert('Error', 'An unexpected error occurred.');
+      setIsLoading(false);
+    }
   };
 
   const handleSearchChange = (text: string) => {
@@ -67,19 +97,38 @@ const RoomListScreen = () => {
         />
       </View>
 
-      {filteredRooms.length > 0 ? (
+      {isLoading ? (
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading rooms...</Text>
+        </View>
+      ) : filteredRooms.length > 0 ? (
         <FlatList
           data={filteredRooms}
           renderItem={renderRoomItem}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.roomList}
+          onRefresh={refreshRooms}
+          refreshing={isLoading}
         />
       ) : (
         <View style={styles.emptyState}>
           <MaterialIcons name="forum" size={64} color={COLORS.textMuted} />
           <Text style={styles.emptyStateText}>No rooms found</Text>
+          <TouchableOpacity
+            style={styles.createEmptyButton}
+            onPress={handleCreateRoom}
+          >
+            <MaterialIcons name="add" size={20} color={COLORS.textPrimary} />
+            <Text style={styles.createEmptyButtonText}>Create a Room</Text>
+          </TouchableOpacity>
         </View>
       )}
+
+      <CreateRoomModal
+        visible={createModalVisible}
+        onClose={() => setCreateModalVisible(false)}
+        onRoomCreated={handleRoomCreated}
+      />
     </View>
   );
 };
@@ -165,6 +214,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textSecondary,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 16,
+    color: COLORS.textSecondary,
+  },
   emptyState: {
     flex: 1,
     justifyContent: 'center',
@@ -175,6 +233,20 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 16,
     color: COLORS.textMuted,
+    marginBottom: 20,
+  },
+  createEmptyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.primary,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  createEmptyButtonText: {
+    color: COLORS.textPrimary,
+    fontWeight: 'bold',
+    marginLeft: 8,
   },
 });
 
