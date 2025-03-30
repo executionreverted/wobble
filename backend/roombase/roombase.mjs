@@ -631,18 +631,18 @@ class RoomBase extends ReadyResource {
 
       // Create hypercore for download
       remoteCore = new Hypercore(tempDir, coreKey, { wait: true });
-      if (onProgress) onProgress(10, "Connected to core");
+      if (onProgress) onProgress(5, "Connected to core");
 
       await remoteCore.ready();
-      if (onProgress) onProgress(20, "Initiated core");
+      if (onProgress) onProgress(10, "Initiated core");
 
       localSwarm = new Hyperswarm();
       topic = await localSwarm.join(coreKey);
-      if (onProgress) onProgress(30, "Joined to swarm");
+      if (onProgress) onProgress(15, "Joined to swarm");
 
       const connectionHandler = (conn) => {
         remoteCore.replicate(conn);
-        if (onProgress) onProgress(40, "Replication is ready");
+        if (onProgress) onProgress(20, "Replication is ready");
       };
 
       localSwarm.on('connection', connectionHandler);
@@ -650,12 +650,12 @@ class RoomBase extends ReadyResource {
       // Wait for peers to connect
       await new Promise(resolve => setTimeout(resolve, 3000));
       await remoteCore.update({ wait: true });
-      if (onProgress) onProgress(50, "Starting hyperblob");
+      if (onProgress) onProgress(25, "Starting hyperblob");
 
       // Create hyperblobs to access the data
       const remoteBlobs = new Hyperblobs(remoteCore);
       await remoteBlobs.ready();
-      if (onProgress) onProgress(60, "Hyperblob is ready");
+      if (onProgress) onProgress(30, "Hyperblob is ready");
 
       // Get the blob ID in the correct format
       const blobId = typeof blobRef.blobId === 'object' ? blobRef.blobId : blobRef.blobId;
@@ -684,10 +684,13 @@ class RoomBase extends ReadyResource {
           });
 
           stream.on('error', err => {
+            console.log('ERROR', err.message)
             reject(err);
           });
 
           stream.on('end', () => {
+
+            console.log('SERVED')
             resolve();
           });
         });
@@ -702,7 +705,7 @@ class RoomBase extends ReadyResource {
         });
       }
 
-      if (onProgress) onProgress(95, "Saving file to disk");
+      if (onProgress) onProgress(99, "Saving file to disk");
 
       await localSwarm.destroy();
 

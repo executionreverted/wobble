@@ -7,6 +7,7 @@ import bip39 from "bip39"
 import b4a from "b4a"
 import Hypercore from 'hypercore'
 import Hyperblobs from 'hyperblobs'
+import Hyperswarm from 'hyperswarm'
 const { IPC } = BareKit
 import UserBase from './userbase/userbase.mjs'
 import RoomBase from './roombase/roombase.mjs'
@@ -19,6 +20,7 @@ import { generateUUID } from './utils.mjs'
 
 let roomBlobStores = {};
 let roomBlobCores = {};
+let roomBlobSwarms = {}
 const getDataPath = () => {
   // Get instance identifier - can be passed as a launch parameter or from env
   const instanceId = Math.ceil(Math.random() * 100)
@@ -522,10 +524,24 @@ const createRoom = async (roomData) => {
     const blobStore = new Hyperblobs(blobCore);
     await blobStore.ready();
 
+    const blobSwarm = new Hyperswarm();
+
+    // Join the swarm with the blob core's key
+    const blobTopic = await blobSwarm.join(blobCore.key);
+
+    blobSwarm.flush()
+
+    // Replicate blob core when connected to peers
+    blobSwarm.on('connection', (connection, peerInfo) => {
+      console.log(`Blob replication connection from peer: ${peerInfo.publicKey.toString('hex').substring(0, 8)}`);
+      console.log('a peer is requesting our blob file')
+      blobCore.replicate(connection);
+    });
+
     // Store blob references in our maps
     roomBlobCores[roomId] = blobCore;
     roomBlobStores[roomId] = blobStore;
-
+    roomBlobSwarms[roomId] = blobSwarm
     // Create the room
     const room = new RoomBase(roomCorestore, {
       roomId: roomId,
@@ -751,7 +767,24 @@ const initializeRoom = async (roomData) => {
     const blobStore = new Hyperblobs(blobCore);
     await blobStore.ready();
 
-    // Store blob references
+    if (!roomBlobSwarms[roomId]) {
+
+      const blobSwarm = new Hyperswarm();
+
+      // Join the swarm with the blob core's key
+      const blobTopic = await blobSwarm.join(blobCore.key);
+
+      blobSwarm.flush()
+
+      // Replicate blob core when connected to peers
+      blobSwarm.on('connection', (connection, peerInfo) => {
+        console.log(`Blob replication connection from peer: ${peerInfo.publicKey.toString('hex').substring(0, 8)}`);
+        console.log('a peer is requesting our blob file')
+        blobCore.replicate(connection);
+      });
+
+      roomBlobSwarms[roomId] = blobSwarm
+    }
     roomBlobCores[roomId] = blobCore;
     roomBlobStores[roomId] = blobStore;
 
@@ -1198,6 +1231,14 @@ const cleanupResources = async () => {
           });
           delete roomCorestores[roomId];
         }
+
+        if (roomBlobSwarms[roomId]) {
+          await roomBlobSwarms[roomId].destroy().catch(err => {
+            console.error(`Error closing room blobswarm ${roomId}:`, err);
+          });
+          delete roomBlobSwarms[roomId];
+        }
+
       } catch (err) {
         console.error(`Error during room cleanup for ${roomId}:`, err);
         // Continue with other rooms even if one fails
@@ -1209,6 +1250,7 @@ const cleanupResources = async () => {
     roomCorestores = {};
     roomBlobStores = {};
     roomBlobCores = {};
+    roomBlobSwarms = {}
 
     // Close user resources with proper null checks
     if (userBase) {
@@ -1765,6 +1807,27 @@ const joinRoomByInvite = async (params) => {
 
     const blobStore = new Hyperblobs(blobCore);
     await blobStore.ready();
+
+    if (!roomBlobSwarms[roomId]) {
+
+      const blobSwarm = new Hyperswarm();
+
+      // Join the swarm with the blob core's key
+      const blobTopic = await blobSwarm.join(blobCore.key);
+
+      blobSwarm.flush()
+
+      // Replicate blob core when connected to peers
+      blobSwarm.on('connection', (connection, peerInfo) => {
+        console.log(`Blob replication connection from peer: ${peerInfo.publicKey.toString('hex').substring(0, 8)}`);
+        console.log('a peer is requesting our blob file')
+        blobCore.replicate(connection);
+      });
+
+      roomBlobSwarms[roomId] = blobSwarm
+    }
+
+
 
     // Join the room using the invite code
     const room = await RoomBase.pair(roomCorestore, inviteCode, {
