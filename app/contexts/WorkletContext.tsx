@@ -172,20 +172,53 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
               }
             }
 
+
+
             if (req.command === 'newMessage') {
               try {
                 const data = b4a.toString(req.data);
                 const parsedData = JSON.parse(data);
-                console.log('New message received:', parsedData);
 
-                if (updateMessages && parsedData.message) {
-                  // Add the new message to the existing messages
-                  updateMessages([parsedData.message]);
+                if (updateMessages && parsedData.success && parsedData.message) {
+                  // Add the new message to the existing messages (don't replace)
+                  updateMessages([parsedData.message], false);
                 }
               } catch (e) {
                 console.error('Error handling newMessage:', e);
               }
             }
+
+
+            if (req.command === 'olderMessages') {
+              try {
+                const data = b4a.toString(req.data);
+                const parsedData = JSON.parse(data);
+
+                if (updateMessages && parsedData.success && Array.isArray(parsedData.messages)) {
+                  // These are older messages to append to the beginning
+                  updateMessages(parsedData.messages, false);
+                }
+              } catch (e) {
+                console.error('Error handling olderMessages:', e);
+              }
+            }
+
+            // Update the roomMessages handler:
+            if (req.command === 'roomMessages') {
+              try {
+                const data = b4a.toString(req.data);
+                const parsedData = JSON.parse(data);
+
+                if (updateMessages && parsedData.success && Array.isArray(parsedData.messages)) {
+                  // Replace current messages with the initial message set
+                  updateMessages(parsedData.messages, true);
+                }
+              } catch (e) {
+                console.error('Error handling roomMessages:', e);
+              }
+            }
+
+
           }
         );
 
@@ -311,6 +344,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       return false;
     }
   }, [rpcClient]);
+
 
   const value = {
     worklet,

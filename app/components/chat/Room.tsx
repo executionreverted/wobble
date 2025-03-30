@@ -70,7 +70,7 @@ const DateHeader = ({ date }: any) => {
 };
 
 const EnhancedChatRoom = () => {
-  const { currentRoom, messages, sendMessage } = useChat();
+  const { currentRoom, messages, sendMessage, loadMoreMessages } = useChat();
   const { user } = useUser();
   const [messageText, setMessageText] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -131,15 +131,12 @@ const EnhancedChatRoom = () => {
 
   // Function to load more messages (previous/older messages)
   const handleLoadMore = useCallback(() => {
-    if (isLoadingMore) return;
+    if (isLoadingMore || !loadMoreMessages) return;
 
-    setIsLoadingMore(true);
-    // This would connect to your actual load more functionality
-    // For now, we'll just simulate a delay
-    setTimeout(() => {
-      setIsLoadingMore(false);
-    }, 1500);
-  }, [isLoadingMore]);
+    loadMoreMessages().catch(err => {
+      console.error('Error loading more messages:', err);
+    });
+  }, [isLoadingMore, loadMoreMessages]);
 
   // Render the loading indicator for older messages
   const renderFooter = () => {

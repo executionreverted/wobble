@@ -542,7 +542,9 @@ const initializeRoom = async (roomData) => {
           content: msg.content,
           sender: msg.sender,
           timestamp: msg.timestamp,
-          system: msg.system || false
+          system: msg.system || false,
+          hasAttachments: msg.hasAttachments || false,
+          attachments: msg.attachments || null
         };
 
         // Send to client
@@ -568,6 +570,8 @@ const initializeRoom = async (roomData) => {
   }
 };
 
+
+
 const getMessagesFromRoom = async (room, roomId, options = {}) => {
   const { limit = 50, reverse = true, before = null, after = null } = options;
 
@@ -587,7 +591,7 @@ const getMessagesFromRoom = async (room, roomId, options = {}) => {
       queryOptions.gt = { timestamp: after };
     }
 
-    // Get messages - handle different return types
+    // Get messages
     const messageStream = room.getMessages(queryOptions);
     let messages = [];
 
@@ -618,7 +622,10 @@ const getMessagesFromRoom = async (room, roomId, options = {}) => {
       content: msg.content,
       sender: msg.sender,
       timestamp: msg.timestamp,
-      system: msg.system || false
+      system: msg.system || false,
+      // Include attachments if present
+      hasAttachments: msg.hasAttachments || false,
+      attachments: msg.attachments || null
     }));
 
   } catch (error) {
@@ -627,35 +634,55 @@ const getMessagesFromRoom = async (room, roomId, options = {}) => {
   }
 };
 
-
-
-
-
-
-
-
-
-// Join a room and get messages
-const joinRoom = async (store, inviteCode, opts = {}) => {
-  if (!store) throw new Error('Corestore is required');
-  if (!inviteCode) throw new Error('Invite code is required');
-
+const joinRoom = async (roomId) => {
   try {
-    // Create pairing instance
-    const pair = RoomBase.pair(store, inviteCode, opts);
+    // Initialize the room if needed
+    let room = roomBases[roomId];
+    if (!room) {
+      // Find the room data in user's rooms
+      const ub = await initializeUserBase();
+      await ub.ready();
+      const userData = await ub.getUserData();
 
-    // Wait for pairing to complete
-    const room = await pair.finished();
+      const roomData = userData.rooms.find(r => r.id === roomId);
+      if (!roomData) {
+        throw new Error(`Room ${roomId} not found in user data`);
+      }
 
-    // Wait for room to be fully ready
+      room = await initializeRoom(roomData);
+      if (!room) {
+        throw new Error(`Failed to initialize room: ${roomId}`);
+      }
+    }
+
     await room.ready();
 
-    return room;
-  } catch (err) {
-    console.error('Error joining room:', err);
-    throw err;
+    // Get recent messages
+    const messages = await getMessagesFromRoom(room, roomId, { limit: 50 });
+
+    // Send response with messages
+    const response = {
+      success: true,
+      roomId,
+      messages
+    };
+
+    const req = rpc.request('roomMessages');
+    req.send(JSON.stringify(response));
+
+  } catch (error) {
+    console.error('Error joining room:', error);
+    const response = {
+      success: false,
+      error: error.message || 'Unknown error joining room',
+      roomId,
+      messages: []
+    };
+
+    const req = rpc.request('roomMessages');
+    req.send(JSON.stringify(response));
   }
-}
+};
 
 // Leave a room (cleanup)
 const leaveRoom = async (roomId) => {
@@ -733,7 +760,17 @@ const loadMoreMessages = async (params) => {
     // Initialize the room if needed
     let room = roomBases[roomId];
     if (!room) {
-      room = await initializeRoom(roomId);
+      // Find the room data in user's rooms
+      const ub = await initializeUserBase();
+      await ub.ready();
+      const userData = await ub.getUserData();
+
+      const roomData = userData.rooms.find(r => r.id === roomId);
+      if (!roomData) {
+        throw new Error(`Room ${roomId} not found in user data`);
+      }
+
+      room = await initializeRoom(roomData);
       if (!room) {
         throw new Error(`Failed to initialize room: ${roomId}`);
       }
@@ -742,7 +779,7 @@ const loadMoreMessages = async (params) => {
     await room.ready();
 
     // Get older messages
-    const messages = await getMessagesFromRoom(room, {
+    const messages = await getMessagesFromRoom(room, roomId, {
       limit,
       reverse: true,
       before

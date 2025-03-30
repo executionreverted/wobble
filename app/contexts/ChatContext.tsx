@@ -74,10 +74,11 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     setRooms(updatedRooms);
   }, []);
 
+
   const handleUpdateMessages = useCallback((newMessages: Message[], replace = false) => {
     setMessages(prev => {
       if (replace) {
-        return [...newMessages].sort((a, b) => b.timestamp - a.timestamp); // Sort newest first for inverted FlatList
+        return [...newMessages].sort((a, b) => b.timestamp - a.timestamp); // Sort newest first
       }
 
       // Combine old and new messages, removing duplicates based on id
@@ -93,7 +94,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         messageMap.set(msg.id, msg);
       });
 
-      // Convert map back to array and sort by timestamp (newest first for inverted FlatList)
+      // Convert map back to array and sort by timestamp (newest first)
       return Array.from(messageMap.values())
         .sort((a, b) => b.timestamp - a.timestamp);
     });
@@ -101,6 +102,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     // Check if we received the full expected count, if not, there are no more messages
     if (newMessages.length < 20) { // Assuming 20 per page
       setHasMoreMessages(false);
+    } else {
+      setHasMoreMessages(true);
     }
   }, []);
 
@@ -221,7 +224,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
 
   // Load older messages (for pagination)
   const loadMoreMessages = async (): Promise<boolean> => {
-    if (!currentRoom || !rpcClient || !isInitialized || isLoadingMore || !hasMoreMessages) {
+    if (!currentRoom || !rpcClient || !isInitialized || isLoadingMore || !hasMoreMessages || !oldestMessageTimestamp) {
       return false;
     }
 
@@ -237,7 +240,11 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       }));
 
       // The response will be handled in the WorkletContext callback
-      setIsLoadingMore(false);
+      // Set loading to false after a reasonable timeout
+      setTimeout(() => {
+        setIsLoadingMore(false);
+      }, 5000);
+
       return true;
     } catch (error) {
       console.error('Error loading more messages:', error);
