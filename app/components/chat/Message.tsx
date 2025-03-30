@@ -17,15 +17,19 @@ const EnhancedMessage = ({ handleAttachmentPress, message, isOwnMessage, roomId 
   let attachments = [];
   if (hasAttachments) {
     try {
+      if (typeof message.attachments === 'string') {
+        attachments = JSON.parse(message.attachments);
+      } else if (Array.isArray(message.attachments)) {
+        attachments = message.attachments;
+      }
 
-      attachments = JSON.parse(message.attachments);
-      // Ensure attachments is an array
+      // Ensure we have an array even after parsing
       if (!Array.isArray(attachments)) {
-        console.warn('Attachments parsed to non-array type:', typeof attachments);
-        attachments = [];
+        console.warn('Attachments not an array after parsing:', typeof attachments);
+        attachments = JSON.parse(attachments)
       }
     } catch (error) {
-      console.error('Error parsing attachments:', error);
+      console.error('Error parsing attachments:', error, message.attachments);
       attachments = [];
     }
   }

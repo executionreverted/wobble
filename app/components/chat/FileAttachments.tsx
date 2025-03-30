@@ -229,6 +229,17 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
   };
 
   // Helper for converting base64 to blob
+  // Add this helper function for base64 conversion on web
+  const atob = (data: string): string => {
+    if (Platform.OS === 'web') {
+      return window.atob(data);
+    } else {
+      // Fallback for non-web platforms if needed
+      return data;
+    }
+  };
+
+  // Replace the b64toBlob function with this improved version
   const b64toBlob = (base64: string, mimeType = '') => {
     if (Platform.OS !== 'web') return null;
 

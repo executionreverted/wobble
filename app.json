@@ -15,7 +15,13 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "to.holepunch.bare.expo"
+      "bundleIdentifier": "to.holepunch.bare.expo",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Roombase needs access to your photo library to share images in chats and save received images.",
+        "NSCameraUsageDescription": "Roombase needs access to your camera to take photos for sharing in chats.",
+        "NSMicrophoneUsageDescription": "Roombase needs access to your microphone to record videos for sharing in chats.",
+        "NSPhotoLibraryAddUsageDescription": "Roombase needs permission to save images to your photo library."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -45,7 +51,8 @@
         {
           "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera",
           "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone",
-          "recordAudioAndroid": true
+          "recordAudioAndroid": true,
+          "NSPhotoLibraryUsageDescription": "Allow $(PRODUCT_NAME) to access your files to send attachments"
         }
       ]
     ],

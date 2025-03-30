@@ -132,16 +132,15 @@ const EnhancedChatRoom = () => {
   };
 
   // For photo selection
+
   const handleSelectPhoto = async () => {
     if (!currentRoom?.id) return;
     setShowAttachmentOptions(false);
 
     try {
-      let result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: false,
-        quality: 0.8,
-        allowsMultipleSelection: false
+      const result = await selectImage({
+        allowsMultipleSelection: false,
+        quality: 0.8
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -181,7 +180,6 @@ const EnhancedChatRoom = () => {
       setIsUploading(false);
     }
   };
-
   // For camera capture
   const handleCameraCapture = async () => {
     if (!currentRoom || !currentRoom.id) return;
@@ -338,7 +336,6 @@ const EnhancedChatRoom = () => {
 
     // Check if the message is from the current user
     const isOwnMessage = user && user.name && item.sender === user.name;
-    const attachment = item.hasAttachments ? JSON.parse(item.attachments) : []
 
     // Use our enhanced message component with proper room ID
     return (
