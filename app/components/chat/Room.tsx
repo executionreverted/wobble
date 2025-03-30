@@ -15,18 +15,14 @@ import {
 import Message, { SystemMessage } from './Message';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation, useRoute } from '@react-navigation/native';
-import * as MediaLibrary from "expo-media-library"
-import * as FileSystem from "expo-file-system"
+import { useNavigation } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
-import * as ImagePicker from 'expo-image-picker';
 import { useChat } from '../../hooks/useChat';
 import { COLORS } from '../../utils/constants';
 import useUser from '../../hooks/useUser';
 import useWorklet from '../../hooks/useWorklet';
 import RoomHeader from './RoomHeader';
-
-// Date header component to show date separators
+import { selectImage, takePhoto } from '../../utils/permissionHelpers';
 
 const EnhancedChatRoom = () => {
   const { currentRoom, messages, sendMessage, loadMoreMessages } = useChat();
@@ -40,53 +36,20 @@ const EnhancedChatRoom = () => {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const flatListRef = useRef(null);
+  const [showAttachmentOptions, setShowAttachmentOptions] = useState(false);
 
   // Handle text input content size change
-  const handleContentSizeChange = (event: any) => {
+  const handleContentSizeChange = (event) => {
     const { height } = event.nativeEvent.contentSize;
     // Constrain height between min and max values
     const newHeight = Math.min(Math.max(44, height), 120); // min: ~1 line, max: ~4 lines
     setInputHeight(newHeight);
   };
 
-  const [showAttachmentOptions, setShowAttachmentOptions] = useState(false);
-
   // Toggle attachment options
   const toggleAttachmentOptions = () => {
     setShowAttachmentOptions(prev => !prev);
   };
-
-  useEffect(() => {
-    (async () => {
-      if (Platform.OS !== 'web') {
-        // Request media library permissions for saving images
-        const mediaPermission = await MediaLibrary.requestPermissionsAsync();
-        if (mediaPermission.status !== 'granted') {
-          console.log('Media library permission not granted');
-        }
-
-        // Request file system permissions for saving files
-        // const filePermission = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
-        // if (!filePermission.granted) {
-        //   console.log('File system permission not granted');
-        // }
-        if (Platform.OS !== 'web' as any) {
-          // Request media library permissions
-          const mediaLibraryPermission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-          if (mediaLibraryPermission.status !== 'granted') {
-            console.log('Media library permission not granted');
-          }
-
-          // Request camera permissions
-          const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
-          if (cameraPermission.status !== 'granted') {
-            console.log('Camera permission not granted');
-          }
-        }
-      }
-    })();
-  }, []);
-
 
   // Add keyboard listeners to track keyboard visibility
   useEffect(() => {
@@ -125,16 +88,33 @@ const EnhancedChatRoom = () => {
       await sendMessage(messageText.trim());
       setMessageText('');
       setInputHeight(44); // Reset input height to single line
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error sending message:', error);
       Alert.alert('Error', 'Failed to send message. Please try again.');
     }
   };
 
-  // For photo selection
+  // Upload a file to the current room
+  const uploadFile = async (fileInfo) => {
+    if (!currentRoom?.id || !rpcClient) return;
 
+    try {
+      setIsUploading(true);
+      const request = rpcClient.request('uploadFile');
+      await request.send(JSON.stringify({
+        roomId: currentRoom.id,
+        ...fileInfo
+      }));
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      Alert.alert('Error', 'Failed to upload file: ' + error.message);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // For photo selection from gallery
   const handleSelectPhoto = async () => {
-    if (!currentRoom?.id) return;
     setShowAttachmentOptions(false);
 
     try {
@@ -150,45 +130,25 @@ const EnhancedChatRoom = () => {
         const fileName = selectedAsset.fileName ||
           `image_${Date.now()}.${selectedAsset.uri.split('.').pop() || 'jpg'}`;
 
-        // Upload the file using path
-        if (rpcClient) {
-          setIsUploading(true);
-
-          try {
-            // Create upload request
-            const request = rpcClient.request('uploadFile');
-
-            // Construct file info with path
-            const fileInfo = {
-              roomId: currentRoom?.id,
-              name: fileName,
-              type: selectedAsset.mimeType || 'image/jpeg',
-              path: selectedAsset.uri,
-              size: selectedAsset.fileSize || 0
-            };
-
-            // Send upload request
-            await request.send(JSON.stringify(fileInfo));
-          } finally {
-            setIsUploading(false);
-          }
-        }
+        await uploadFile({
+          name: fileName,
+          type: selectedAsset.mimeType || 'image/jpeg',
+          path: selectedAsset.uri,
+          size: selectedAsset.fileSize || 0
+        });
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error selecting photo:', error);
       Alert.alert('Error', 'Failed to select photo: ' + error.message);
-      setIsUploading(false);
     }
   };
+
   // For camera capture
   const handleCameraCapture = async () => {
-    if (!currentRoom || !currentRoom.id) return;
     setShowAttachmentOptions(false);
 
     try {
-      let result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ['images', 'videos'],
-        allowsEditing: false,
+      const result = await takePhoto({
         quality: 0.8
       });
 
@@ -198,41 +158,21 @@ const EnhancedChatRoom = () => {
         // Generate file name
         const fileName = `camera_${Date.now()}.jpg`;
 
-        // Upload the file using path
-        if (rpcClient) {
-          setIsUploading(true);
-
-          try {
-            // Create upload request
-            const request = rpcClient.request('uploadFile');
-
-            // Construct file info with path
-            const fileInfo = {
-              roomId: currentRoom?.id,
-              name: fileName,
-              type: 'image/jpeg',
-              path: selectedAsset.uri,
-              size: selectedAsset.fileSize || 0
-            };
-
-            // Send upload request
-            await request.send(JSON.stringify(fileInfo));
-          } finally {
-            setIsUploading(false);
-          }
-        }
+        await uploadFile({
+          name: fileName,
+          type: 'image/jpeg',
+          path: selectedAsset.uri,
+          size: selectedAsset.fileSize || 0
+        });
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error capturing photo:', error);
       Alert.alert('Error', 'Failed to capture photo: ' + error.message);
-      setIsUploading(false);
     }
   };
 
   // For document selection
   const handleSelectDocument = async () => {
-
-    if (!currentRoom || !currentRoom.id) return;
     setShowAttachmentOptions(false);
 
     try {
@@ -244,90 +184,61 @@ const EnhancedChatRoom = () => {
       if (result.canceled === false && result.assets && result.assets.length > 0) {
         const file = result.assets[0];
 
-        if (rpcClient) {
-          setIsUploading(true);
-
-          try {
-            // Create upload request
-            const request = rpcClient.request('uploadFile');
-
-            // Construct file info with path
-            const fileInfo = {
-              roomId: currentRoom.id,
-              name: file.name,
-              type: file.mimeType,
-              path: file.uri,
-              size: file.size
-            };
-
-            // Send upload request
-            await request.send(JSON.stringify(fileInfo));
-          } finally {
-            setIsUploading(false);
-          }
-        }
+        await uploadFile({
+          name: file.name,
+          type: file.mimeType,
+          path: file.uri,
+          size: file.size
+        });
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error selecting document:', error);
       Alert.alert('Error', 'Failed to select document: ' + error.message);
-      setIsUploading(false);
     }
   };
 
   // Function to handle attachment press/download
-  const handleAttachmentPress = async (attachment: any) => {
-    console.log(attachment)
-    if (!currentRoom || !currentRoom.id) return;
-    if (!attachment || !attachment.blobId) {
+  const handleAttachmentPress = async (attachment) => {
+    if (!currentRoom?.id || !attachment?.blobId) {
       Alert.alert('Error', 'Invalid attachment data');
       return;
     }
 
-    try {
-      Alert.alert(
-        'Download File',
-        `Do you want to download "${attachment.name}"?`,
-        [
-          {
-            text: 'Cancel',
-            style: 'cancel'
-          },
-          {
-            text: 'Download',
-            onPress: async () => {
-              try {
-                setIsUploading(true); // Reuse uploading state for download
+    Alert.alert(
+      'Download File',
+      `Do you want to download "${attachment.name}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Download',
+          onPress: async () => {
+            try {
+              setIsUploading(true); // Reuse uploading state for download indicator
 
-                // Request file download from backend
-                const request = rpcClient.request('downloadFile');
-                await request.send(JSON.stringify({
-                  roomId: currentRoom.id,
-                  attachment: attachment
-                }));
+              // Request file download from backend
+              const request = rpcClient.request('downloadFile');
+              await request.send(JSON.stringify({
+                roomId: currentRoom.id,
+                attachment: attachment
+              }));
 
-                // Show success message (actual download will be handled by the operating system)
-                Alert.alert('Download Started', 'Your file download has started');
-              } catch (err) {
-                console.error('Error downloading file:', err);
-                Alert.alert('Download Failed', 'Could not download the file');
-              } finally {
-                setIsUploading(false);
-              }
+              // Success message (actual download will be handled by the WorkletContext callbacks)
+              Alert.alert('Download Started', 'Your file download has started');
+            } catch (err) {
+              console.error('Error downloading file:', err);
+              Alert.alert('Download Failed', 'Could not download the file');
+            } finally {
+              setIsUploading(false);
             }
           }
-        ]
-      );
-    } catch (error) {
-      console.error('Error handling attachment:', error);
-      Alert.alert('Error', 'Failed to handle attachment');
-    }
+        }
+      ]
+    );
   };
 
   // Function to render each message
-  const renderItem = ({ item }: any) => {
-    if (!item) {
-      return null;
-    }
+  const renderItem = ({ item }) => {
+    if (!item) return null;
 
     // If the message is a system message
     if (item.system) {
@@ -337,18 +248,17 @@ const EnhancedChatRoom = () => {
     // Check if the message is from the current user
     const isOwnMessage = user && user.name && item.sender === user.name;
 
-    // Use our enhanced message component with proper room ID
     return (
       <Message
         handleAttachmentPress={handleAttachmentPress}
         message={item}
-        isOwnMessage={isOwnMessage as boolean}
-        roomId={currentRoom?.id as any}
+        isOwnMessage={isOwnMessage}
+        roomId={currentRoom?.id}
       />
     );
   };
 
-  // Define the empty component with debug info
+  // Define the empty component
   const EmptyMessagesList = () => (
     <View style={styles.emptyContainer}>
       <MaterialIcons name="forum" size={48} color={COLORS.textMuted} />
@@ -386,8 +296,6 @@ const EnhancedChatRoom = () => {
       </View>
     );
   };
-
-  console.log({ messages })
 
   return (
     <KeyboardAvoidingView
@@ -525,85 +433,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 20,
   },
-  messageContainer: {
-    marginVertical: 6,
-    maxWidth: '80%',
-    alignSelf: 'flex-start',
-  },
-  ownMessageContainer: {
-    alignSelf: 'flex-end',
-  },
-  otherMessageContainer: {
-    alignSelf: 'flex-start',
-  },
-  messageSender: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
-    marginBottom: 2,
-  },
-  messageContent: {
-    padding: 10,
-    borderRadius: 16,
-  },
-  ownMessageContent: {
-    backgroundColor: COLORS.primary,
-    borderBottomRightRadius: 4,
-  },
-  otherMessageContent: {
-    backgroundColor: COLORS.secondaryBackground,
-    borderBottomLeftRadius: 4,
-  },
-  messageText: {
-    fontSize: 15,
-    color: COLORS.textPrimary,
-  },
-  messageTimestamp: {
-    fontSize: 10,
-    marginTop: 2,
-    alignSelf: 'flex-end',
-    color: COLORS.textMuted,
-  },
-  ownMessageTimestamp: {
-    color: COLORS.textSecondary,
-  },
-  otherMessageTimestamp: {
-    color: COLORS.textMuted,
-  },
-  systemMessageContainer: {
-    alignSelf: 'center',
-    marginVertical: 10,
-    backgroundColor: 'rgba(114, 137, 218, 0.1)',
-    padding: 8,
-    borderRadius: 12,
-    marginHorizontal: 40,
-  },
-  systemMessageText: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-  },
-  systemMessageTimestamp: {
-    fontSize: 10,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    marginTop: 4,
-  },
-  dateHeaderContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 16,
-  },
-  dateHeaderLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: COLORS.separator,
-  },
-  dateHeaderText: {
-    fontSize: 12,
-    color: COLORS.textMuted,
-    marginHorizontal: 10,
-  },
   inputContainer: {
     flexDirection: 'row',
     paddingHorizontal: 16,
@@ -688,56 +517,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: COLORS.textSecondary,
   },
-  // Attachment styles
-  attachmentsContainer: {
-    marginTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.1)',
-    paddingTop: 8,
-  },
-  attachmentContainer: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(0,0,0,0.1)',
-    borderRadius: 8,
-    padding: 8,
-    marginBottom: 8,
-    alignItems: 'center',
-  },
-  attachmentIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  attachmentDetails: {
-    flex: 1,
-  },
-  attachmentName: {
-    fontSize: 14,
-    color: COLORS.textPrimary,
-    marginBottom: 2,
-  },
-  attachmentSize: {
-    fontSize: 12,
-    color: COLORS.textSecondary,
-  },
-  downloadIcon: {
-    marginLeft: 8,
-  },
-  imageAttachmentContainer: {
-    marginBottom: 8,
-  },
-  imageAttachmentPlaceholder: {
-    width: '100%',
-    height: 150,
-    backgroundColor: 'rgba(0,0,0,0.1)',
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   uploadingOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.7)',
@@ -757,6 +536,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: COLORS.textPrimary
   }
-})
+});
 
-export default EnhancedChatRoom
+export default EnhancedChatRoom;

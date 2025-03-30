@@ -142,6 +142,7 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
     }
 
     // Auto-download preview if attachment is an image and we don't have a preview yet
+    console.log(!downloadStatus, !isDownloading, !hasPreview, isImageFile(attachment.name))
     if (!downloadStatus && !isDownloading && !hasPreview && isImageFile(attachment.name)) {
       downloadPreview();
     }

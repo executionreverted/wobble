@@ -25,7 +25,7 @@ const EnhancedMessage = ({ handleAttachmentPress, message, isOwnMessage, roomId 
 
       // Ensure we have an array even after parsing
       if (!Array.isArray(attachments)) {
-        console.warn('Attachments not an array after parsing:', typeof attachments);
+        // console.warn('Attachments not an array after parsing:', typeof attachments);
         attachments = JSON.parse(attachments)
       }
     } catch (error) {
