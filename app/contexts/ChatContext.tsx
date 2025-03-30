@@ -234,39 +234,6 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     }
   }, [user]);
 
-  // Refresh rooms list from backend
-  const refreshRooms = async () => {
-    if (!rpcClient || !isInitialized) return;
-
-    try {
-      const request = rpcClient.request('getRooms');
-      await request.send();
-      // The response will be handled by the RPC event handler in WorkletContext
-    } catch (error) {
-      console.error('Error refreshing rooms:', error);
-    }
-  };
-
-  // Create a new room
-  const createRoom = async (name: string, description: string): Promise<{ success: boolean, roomId: string }> => {
-    if (!rpcClient || !isInitialized || !user) {
-      return { success: false, roomId: '' };
-    }
-
-    try {
-      const roomData = {
-        name,
-        description: description || `A room for ${name}`
-      };
-
-      const request = rpcClient.request('createRoom');
-      await request.send(JSON.stringify(roomData));
-      return { success: true, roomId: 'pending' };
-    } catch (error) {
-      console.error('Error creating room:', error);
-      return { success: false, roomId: '' };
-    }
-  };
 
   const selectRoom = async (room: Room) => {
     console.log('ChatContext: Selecting room', room.id);
@@ -395,6 +362,116 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       return false;
     }
   };
+
+
+  // Update the refreshRooms function in ChatContext.tsx
+  const refreshRooms = async () => {
+    if (!rpcClient || !isInitialized) return;
+
+    try {
+      console.log('ChatContext: Refreshing rooms list');
+
+      // Clear loading states for better UX
+      setIsLoading(true);
+
+      const request = rpcClient.request('getRooms');
+      await request.send();
+
+      // The response will be handled by the RPC event handler in WorkletContext
+      // which will call our updateRooms callback
+
+      // Add a timeout to ensure UI is updated even if the backend doesn't respond
+      setTimeout(() => {
+        setIsLoading(false);
+      }, 5000);
+
+      return true;
+    } catch (error) {
+      console.error('Error refreshing rooms:', error);
+      setIsLoading(false);
+      return false;
+    }
+  };
+
+  // Update the createRoom function in ChatContext.tsx
+  const createRoom = async (name: string, description: string): Promise<{ success: boolean, roomId: string }> => {
+    if (!rpcClient || !isInitialized || !user) {
+      return { success: false, roomId: '' };
+    }
+
+    try {
+      console.log('ChatContext: Creating room', name);
+      const roomData = {
+        name,
+        description: description || `A room for ${name}`
+      };
+
+      const request = rpcClient.request('createRoom');
+      await request.send(JSON.stringify(roomData));
+
+      // Since the backend will trigger a user update which will update the rooms list,
+      // we don't need to do anything else here
+
+      return { success: true, roomId: 'pending' };
+    } catch (error) {
+      console.error('Error creating room:', error);
+      return { success: false, roomId: '' };
+    }
+  };
+
+  // Update the updateRoomsCallback in the useEffect in ChatContext.tsx
+  const updateRoomsCallback = (updatedRooms: Room[]) => {
+    console.log('ChatContext: Received rooms update', updatedRooms.length);
+
+    // Stop loading indicator first
+    setIsLoading(false);
+
+    // Update rooms state with the new list
+    setRooms(updatedRooms);
+
+    // Pre-initialize message containers for each room
+    updatedRooms.forEach(room => {
+      setMessagesByRoom(prev => {
+        if (!prev[room.id]) {
+          return {
+            ...prev,
+            [room.id]: []
+          };
+        }
+        return prev;
+      });
+
+      // Set default values for each room
+      setHasMoreMessagesByRoom(prev => ({
+        ...prev,
+        [room.id]: true
+      }));
+
+      setIsLoadingByRoom(prev => ({
+        ...prev,
+        [room.id]: false
+      }));
+    });
+
+    // Request messages for all rooms to preload
+    updatedRooms.forEach(room => {
+      if (!initializedRooms.current.has(room.id)) {
+        // Only initialize rooms we haven't initialized yet
+        initializedRooms.current.add(room.id);
+
+        // Request messages in background
+        if (rpcClient) {
+          try {
+            const request = rpcClient.request('joinRoom');
+            request.send(JSON.stringify({ roomId: room.id }));
+          } catch (error) {
+            console.error(`Error pre-initializing room ${room.id}:`, error);
+          }
+        }
+      }
+    });
+  };
+
 
   // Append current room's loading state to messages
   const messagesWithLoadingState = getCurrentMessages();

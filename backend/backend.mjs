@@ -11,7 +11,6 @@ const { IPC } = BareKit
 import UserBase from './userbase/userbase.mjs'
 import RoomBase from './roombase/roombase.mjs'
 import { generateUUID } from './utils.mjs'
-import process from "bare-process"
 
 // const path =
 //   Bare.argv[0] === 'android'
@@ -140,6 +139,13 @@ const rpc = new RPC(IPC, (req, error) => {
     const data = b4a.toString(req.data)
     const parsedData = JSON.parse(data)
     createRoom(parsedData)
+  }
+
+  // Add this to the RPC handler in backend.mjs
+  if (req.command === 'joinRoomByInvite') {
+    const data = b4a.toString(req.data);
+    const parsedData = JSON.parse(data);
+    joinRoomByInvite(parsedData);
   }
 
   if (req.command === 'getRooms') {
@@ -339,9 +345,9 @@ const checkExistingUser = async () => {
  * ROOM RELATED FUNCTIONS
  *************************/
 
-// Create a new room
-// Fix for the createRoom function in backend.mjs
 
+
+// Replace the existing createRoom function in backend.mjs with this improved version
 const createRoom = async (roomData) => {
   try {
     // First ensure UserBase is initialized
@@ -353,8 +359,13 @@ const createRoom = async (roomData) => {
     await ub.ready();
     const user = await ub.getUserData();
 
+    if (!user) {
+      throw new Error('User not found');
+    }
+
     // Generate a unique room ID using our utility function
     const roomId = generateUUID();
+    console.log(`Creating room: ${roomId} (${roomData.name})`);
 
     // Create room directory
     const roomDir = `${roomBasePath}/${roomId}`;
@@ -389,6 +400,7 @@ const createRoom = async (roomData) => {
 
     // Create an invite for others to join
     const invite = await room.createInvite();
+    console.log(`Created invite for room ${roomId}: ${invite.substring(0, 10)}...`);
 
     // Create room object for response
     const newRoom = {
@@ -396,26 +408,55 @@ const createRoom = async (roomData) => {
       name: roomData.name,
       description: roomData.description || `A room created by ${user.name}`,
       createdAt: Date.now(),
-      invite: invite
+      invite: invite,
+      key: room.key.toString('hex'),
+      encryptionKey: room.encryptionKey.toString('hex')
     };
+
+    // Set up message listener
+    room.on('new-message', (msg) => {
+      // Format the message
+      const formattedMessage = {
+        id: msg.id,
+        roomId: roomId,
+        content: msg.content,
+        sender: msg.sender,
+        timestamp: msg.timestamp,
+        system: msg.system || false
+      };
+
+      // Send to client
+      const req = rpc.request('newMessage');
+      req.send(JSON.stringify({
+        success: true,
+        message: formattedMessage
+      }));
+    });
+    room._hasMessageListener = true;
 
     // Add this room to the user's rooms list
     let userRooms = [];
-    if (user.rooms) {
-      // Parse existing rooms if it's a string
-      if (typeof user.rooms === 'string') {
-        try {
-          userRooms = JSON.parse(user.rooms);
-        } catch (e) {
-          console.error('Error parsing user.rooms:', e);
-          userRooms = [];
+    try {
+      if (user.rooms) {
+        // Parse existing rooms if it's a string
+        if (typeof user.rooms === 'string') {
+          try {
+            userRooms = JSON.parse(user.rooms);
+          } catch (e) {
+            console.error('Error parsing user.rooms:', e);
+            userRooms = [];
+          }
+        } else if (Array.isArray(user.rooms)) {
+          userRooms = [...user.rooms];
         }
-      } else if (Array.isArray(user.rooms)) {
-        userRooms = [...user.rooms];
       }
+    } catch (e) {
+      console.error('Error processing user rooms:', e);
+      userRooms = [];
     }
 
     userRooms.push(newRoom);
+    console.log(`Adding room ${roomId} to user's rooms. Total rooms: ${userRooms.length}`);
 
     // Update the user profile with the new rooms list - convert to string for storage
     await ub.updateUserProfile({
@@ -437,6 +478,7 @@ const createRoom = async (roomData) => {
 
     const req = rpc.request('roomCreated');
     req.send(JSON.stringify(response));
+    console.log(`Room ${roomId} created successfully, response sent to client`);
 
   } catch (error) {
     console.error('Error creating room:', error);
@@ -449,6 +491,8 @@ const createRoom = async (roomData) => {
     req.send(JSON.stringify(response));
   }
 };
+
+
 
 const initializeUserRooms = async () => {
   if (!userBase) return;
@@ -1141,6 +1185,156 @@ const reinitializeBackend = async () => {
     trying = false;
     isBackendInitialized = true;
     console.log('Backend reinitialization complete');
+  }
+};
+
+const joinRoomByInvite = async (params) => {
+  const { inviteCode } = params;
+
+  if (!inviteCode || typeof inviteCode !== 'string') {
+    const response = {
+      success: false,
+      error: 'Invalid invite code'
+    };
+    const req = rpc.request('roomJoinResult');
+    req.send(JSON.stringify(response));
+    return;
+  }
+
+  try {
+    // First ensure UserBase is initialized
+    const ub = await initializeUserBase();
+    if (!ub) {
+      throw new Error('UserBase not initialized');
+    }
+
+    await ub.ready();
+    const user = await ub.getUserData();
+
+    // Generate a unique room ID
+    const roomId = generateUUID();
+
+    // Create room directory
+    const roomDir = `${roomBasePath}/${roomId}`;
+    if (!fs.existsSync(roomDir)) {
+      fs.mkdirSync(roomDir, { recursive: true });
+    }
+
+    // Create corestore for the room
+    const roomCorestore = new Corestore(roomDir);
+    await roomCorestore.ready();
+
+    // Set up blob core and store for attachments
+    const blobCore = new Hypercore(roomDir + '/blobs');
+    await blobCore.ready();
+
+    const blobStore = new Hyperblobs(blobCore);
+    await blobStore.ready();
+
+    // Join the room using the invite code
+    const room = await RoomBase.pair(roomCorestore, inviteCode, {
+      blobCore,
+      blobStore
+    }).finished();
+
+    await room.ready();
+
+    // Get room info
+    const roomInfo = await room.getRoomInfo();
+    if (!roomInfo) {
+      throw new Error('Could not get room information');
+    }
+
+    // Store the instances
+    roomCorestores[roomId] = roomCorestore;
+    roomBases[roomId] = room;
+
+    // Set up message listener
+    if (!room._hasMessageListener) {
+      room.on('new-message', (msg) => {
+        // Format the message
+        const formattedMessage = {
+          id: msg.id,
+          roomId: roomId,
+          content: msg.content,
+          sender: msg.sender,
+          timestamp: msg.timestamp,
+          system: msg.system || false
+        };
+
+        // Send to client
+        const req = rpc.request('newMessage');
+        req.send(JSON.stringify({
+          success: true,
+          message: formattedMessage
+        }));
+      });
+
+      room._hasMessageListener = true;
+    }
+
+    // Create room object for user storage
+    const newRoom = {
+      id: roomId,
+      name: roomInfo.name || 'Joined Room',
+      description: `Joined via invite`,
+      createdAt: roomInfo.createdAt || Date.now(),
+      invite: inviteCode,
+      key: room.key.toString('hex'),
+      encryptionKey: room.encryptionKey.toString('hex')
+    };
+
+    // Add this room to the user's rooms list
+    let userRooms = [];
+    if (user.rooms) {
+      // Parse existing rooms if it's a string
+      if (typeof user.rooms === 'string') {
+        try {
+          userRooms = JSON.parse(user.rooms);
+        } catch (e) {
+          console.error('Error parsing user.rooms:', e);
+          userRooms = [];
+        }
+      } else if (Array.isArray(user.rooms)) {
+        userRooms = [...user.rooms];
+      }
+    }
+
+    // Only add if not already in rooms
+    if (!userRooms.some(r => r.id === roomId)) {
+      userRooms.push(newRoom);
+
+      // Update the user profile with the new rooms list
+      await ub.updateUserProfile({
+        rooms: JSON.stringify(userRooms)
+      });
+    }
+
+    // Get updated user data
+    const updatedUser = await ub.getUserData();
+
+    // Send updated user info back to client
+    const userReq = rpc.request('userInfo');
+    userReq.send(JSON.stringify(updatedUser));
+
+    // Send room join response
+    const response = {
+      success: true,
+      room: newRoom
+    };
+
+    const req = rpc.request('roomJoinResult');
+    req.send(JSON.stringify(response));
+
+  } catch (error) {
+    console.error('Error joining room by invite:', error);
+    const response = {
+      success: false,
+      error: error.message || 'Failed to join room'
+    };
+
+    const req = rpc.request('roomJoinResult');
+    req.send(JSON.stringify(response));
   }
 };
 

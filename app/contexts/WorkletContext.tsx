@@ -163,6 +163,29 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
               }
             }
 
+            if (req.command === 'roomJoinResult') {
+              try {
+                const data = b4a.toString(req.data);
+                const parsedData = JSON.parse(data);
+                console.log('Room join result:', parsedData);
+
+                if (parsedData.success && parsedData.room) {
+                  // If the room was successfully joined, call the appropriate callback
+                  if (onRoomJoined) {
+                    onRoomJoined(parsedData.room);
+                  } else {
+                    console.log('No onRoomJoined callback registered');
+
+                    // Request updated user data to make sure rooms are updated
+                    const userCheckRequest = client.request('checkUserExists');
+                    userCheckRequest.send("");
+                  }
+                }
+              } catch (e) {
+                console.error('Error handling roomJoinResult:', e);
+              }
+            }
+
             if (req.command === 'roomMessages') {
               try {
                 const data = b4a.toString(req.data);

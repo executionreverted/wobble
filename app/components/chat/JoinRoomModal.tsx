@@ -18,7 +18,7 @@ import useWorklet from '../../hooks/useWorklet';
 interface JoinRoomModalProps {
   visible: boolean;
   onClose: () => void;
-  onRoomJoined: (roomId: string) => void;
+  onRoomJoined: (room: any) => void;
 }
 
 const JoinRoomModal: React.FC<JoinRoomModalProps> = ({

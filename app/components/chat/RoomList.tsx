@@ -31,6 +31,13 @@ const RoomListScreen = () => {
     setCallbacks({
       onRoomJoined: handleRoomJoined
     });
+
+    return () => {
+      // Reset callbacks when component unmounts to avoid memory leaks
+      setCallbacks({
+        onRoomJoined: undefined
+      });
+    };
   }, []);
 
   // Filter rooms when search query or rooms list changes
@@ -53,6 +60,7 @@ const RoomListScreen = () => {
   };
 
   const handleRoomJoined = (room: Room) => {
+    console.log('Room joined successfully:', room);
     refreshRooms();
     Alert.alert('Success', `You've joined the room: ${room.name}`);
   };
@@ -63,8 +71,11 @@ const RoomListScreen = () => {
       const result = await createRoom(roomName, roomDescription);
       if (!result.success) {
         Alert.alert('Error', 'Failed to create room. Please try again.');
+      } else {
+        console.log('Room created successfully, awaiting refresh');
+        // Refresh rooms to get the new room in the list
+        await refreshRooms();
       }
-      // No need to do anything else - room will be added via user update
     } catch (error) {
       console.error('Error creating room:', error);
       Alert.alert('Error', 'An unexpected error occurred.');
