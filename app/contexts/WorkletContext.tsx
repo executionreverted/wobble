@@ -45,7 +45,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
   const [isBackendReady, setIsBackendReady] = useState(false);
   // Callbacks for updating rooms and messages - will be set by ChatContext
   const [updateRooms, setUpdateRooms] = useState<((rooms: Room[]) => void) | undefined>(undefined);
-  const [updateMessages, setUpdateMessages] = useState<((messages: Message[]) => void) | undefined>(undefined);
+  const [updateMessages, setUpdateMessages] = useState<((messages: Message[], replace: boolean) => void) | undefined>(undefined);
   const [onRoomCreated, setOnRoomCreated] = useState<((room: Room) => void) | undefined>(undefined);
 
   // Initialize worklet on component mount
@@ -173,14 +173,14 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
             }
 
 
-
             if (req.command === 'newMessage') {
               try {
                 const data = b4a.toString(req.data);
                 const parsedData = JSON.parse(data);
+                console.log('New message received:', parsedData); // Add this debug log
 
                 if (updateMessages && parsedData.success && parsedData.message) {
-                  // Add the new message to the existing messages (don't replace)
+                  // Add the new message to the existing messages
                   updateMessages([parsedData.message], false);
                 }
               } catch (e) {
@@ -312,7 +312,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
   // Set callback functions from ChatContext
   const setCallbacks = useCallback((callbacks: {
     updateRooms?: (rooms: Room[]) => void,
-    updateMessages?: (messages: Message[]) => void,
+    updateMessages?: (messages: Message[], bool: boolean) => void,
     onRoomCreated?: (room: Room) => void
   }) => {
     if (callbacks.updateRooms) setUpdateRooms(() => callbacks.updateRooms);
@@ -343,6 +343,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       setIsLoading(false);
       return false;
     }
+
+    return false
   }, [rpcClient]);
 
 

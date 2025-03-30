@@ -542,10 +542,10 @@ const initializeRoom = async (roomData) => {
           content: msg.content,
           sender: msg.sender,
           timestamp: msg.timestamp,
-          system: msg.system || false,
-          hasAttachments: msg.hasAttachments || false,
-          attachments: msg.attachments || null
+          system: msg.system || false
         };
+
+        console.log('RECEIVED NEW MESSAGE:', formattedMessage);
 
         // Send to client
         const req = rpc.request('newMessage');
@@ -883,6 +883,7 @@ const cleanupResources = async () => {
     } catch (err) {
       console.error(`Error during room cleanup for ${roomId}:`, err);
     }
+    isBackendInitialized = false
   }
 
   // Reset room collections
@@ -916,11 +917,12 @@ const cleanupResources = async () => {
 
   console.log('Resource cleanup complete');
 }
-
+let trying;
 // Reinitialize backend after cleanup
 const reinitializeBackend = async () => {
   console.log('Reinitializing backend...');
-
+  if (trying) return;
+  trying = true;
   // Clean up existing resources first
   await cleanupResources();
 
@@ -954,7 +956,8 @@ const reinitializeBackend = async () => {
     const req = rpc.request('backendInitialized');
     req.send(JSON.stringify({ success: true }));
   }
-
+  trying = false;
+  isBackendInitialized = true;
   console.log('Backend reinitialization complete');
 }
 
@@ -965,7 +968,7 @@ const teardown = async () => {
   console.log('Teardown complete');
 }
 
-
 if (!isBackendInitialized) {
-  await reinitializeBackend();
+  isBackendInitialized = true
+  reinitializeBackend()
 }

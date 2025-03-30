@@ -1,3 +1,5 @@
+import crypto from "bare-crypto"
+import b4a from "b4a"
 export const sanitizeTextForTerminal = (text) => {
   if (!text) return '';
 
