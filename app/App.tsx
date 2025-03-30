@@ -95,7 +95,7 @@ const AppNavigator = () => {
             console.error("Error reinitializing after timeout:", err);
           });
         }
-      }, 10000); // 10 second timeout
+      }, 1000); // 10 second timeout
     }
 
     return () => {
@@ -105,6 +105,20 @@ const AppNavigator = () => {
       }
     };
   }, [isInitialized, isLoading, isBackendReady, appReady, reinitializeBackend]);
+
+  useEffect(() => {
+    if (isInitialized && !isLoading) {
+      // If backend is initialized but no user exists, just show login
+      if (!user) {
+        setAppReady(true);
+      }
+      // Otherwise if user exists and backend is ready
+      else if (isBackendReady) {
+        setAppReady(true);
+      }
+    }
+  }, [isInitialized, isLoading, isBackendReady, user]);
+
   // Show loader if app is not ready yet
   if (!appReady) {
     return <Loader message="Setting up your secure connection..." />;

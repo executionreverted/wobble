@@ -36,6 +36,9 @@ const path = getDataPath();
 const userBasePath = path + '/userbase/'
 const roomBasePath = path + '/roombase/'
 let trying;
+
+
+let seedProvided = false;
 // Global variables
 let userCorestore;
 let userBase;
@@ -72,7 +75,7 @@ const sendSeed = () => {
 }
 
 // Function to initialize UserBase if not already initialized
-const initializeUserBase = async () => {
+const initializeUserBase = async (forceSeedRequired = true) => {
   try {
     // If UserBase is already initialized and ready, just return it
     if (userBase) {
@@ -80,6 +83,11 @@ const initializeUserBase = async () => {
       return userBase;
     }
 
+    // If we require a seed and haven't gotten one yet, don't initialize
+    if (forceSeedRequired && !seedProvided) {
+      console.log('Seed required but not provided yet');
+      return null;
+    }
     // Check if user directory exists
     if (!fs.existsSync(userBasePath)) {
       console.log('User directory does not exist');
@@ -256,12 +264,16 @@ const createNewAccount = async (seed) => {
   if (userBase) return { exists: true }
 
   if (hasAccount()) {
+    console.error('HAS ACCOUNT')
     return { exists: true }
   }
 
   if (!seed || seed.length == 0) {
     return { invalidSeed: true }
   }
+
+  seedProvided = true; // Set this flag when seed is provided
+
 
   try {
     // Create directory if it doesn't exist
@@ -293,7 +305,11 @@ const createNewAccount = async (seed) => {
 }
 
 const hasAccount = () => {
-  return fs.existsSync(userBasePath)
+  const files = fs.readdirSync(userBasePath);
+  if (files.length === 0) {
+    return false;
+  }
+  return true
 }
 
 const checkExistingUser = async () => {

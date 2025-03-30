@@ -101,6 +101,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
                 const data = b4a.toString(req.data);
                 const parsedData = JSON.parse(data);
                 console.log('User info received:', parsedData);
+
+                // This will trigger navigation via the useEffect hook in Login.tsx
                 updateUser(parsedData);
               } catch (e) {
                 console.error('Error handling userInfo:', e);
