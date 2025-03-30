@@ -43,19 +43,14 @@ const RoomListScreen = () => {
     setIsLoading(true);
     try {
       const result = await createRoom(roomName, roomDescription);
-
-      if (result.success) {
-        // Wait a moment for backend to update, then refresh the list
-        setTimeout(() => {
-          refreshRooms().finally(() => setIsLoading(false));
-        }, 500);
-      } else {
+      if (!result.success) {
         Alert.alert('Error', 'Failed to create room. Please try again.');
-        setIsLoading(false);
       }
+      // No need to do anything else - room will be added via user update
     } catch (error) {
       console.error('Error creating room:', error);
       Alert.alert('Error', 'An unexpected error occurred.');
+    } finally {
       setIsLoading(false);
     }
   };

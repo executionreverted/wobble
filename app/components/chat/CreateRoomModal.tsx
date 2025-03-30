@@ -49,17 +49,11 @@ const CreateRoomModal: React.FC<CreateRoomModalProps> = ({
       const request = rpcClient.request('createRoom');
       await request.send(JSON.stringify(roomData));
 
-      // The actual response will be handled in the RPC event handler in WorkletContext
-      // For now, we'll just close the modal and wait for the room to be added to the context
-
-      // Pass room data back to parent
-      onRoomCreated(roomName.trim(), roomDescription.trim());
-
       // Reset form
       setRoomName('');
       setRoomDescription('');
 
-      // Close modal
+      // Close modal - don't call onRoomCreated here, let the RPC callback handle it
       onClose();
 
     } catch (error) {

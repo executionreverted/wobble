@@ -25,6 +25,7 @@ let userBase;
 let roomBases = {};
 let roomCorestores = {}
 
+let isBackendInitialized = false;
 // Create necessary directories
 if (!fs.existsSync(path)) {
   fs.mkdirSync(path, { recursive: true })
@@ -276,6 +277,7 @@ const checkExistingUser = async () => {
  *************************/
 
 // Create a new room
+// In the createRoom function in backend/backend.mjs
 const createRoom = async (roomData) => {
   try {
     if (!userBase) {
@@ -332,12 +334,20 @@ const createRoom = async (roomData) => {
     };
 
     // Add this room to the user's rooms list
-    if (user.rooms) {
-      user.rooms.push(newRoom);
-      await userBase.updateUserProfile({ rooms: user.rooms });
-    }
+    const userRooms = Array.isArray(user.rooms) ? [...user.rooms] : [];
+    userRooms.push(newRoom);
 
-    // Send response
+    // Update the user profile with the new rooms list
+    await userBase.updateUserProfile({ rooms: userRooms });
+
+    // Get updated user data
+    const updatedUser = await userBase.getUserData();
+
+    // Send updated user info back to client
+    const userReq = rpc.request('userInfo');
+    userReq.send(JSON.stringify(updatedUser));
+
+    // Send room creation response
     const response = {
       success: true,
       room: newRoom
@@ -345,9 +355,6 @@ const createRoom = async (roomData) => {
 
     const req = rpc.request('roomCreated');
     req.send(JSON.stringify(response));
-
-    // Also update the rooms list
-    getRooms();
 
   } catch (error) {
     console.error('Error creating room:', error);
@@ -360,53 +367,6 @@ const createRoom = async (roomData) => {
     req.send(JSON.stringify(response));
   }
 };
-
-// Get all rooms the user is part of
-const getRooms = async () => {
-  try {
-    if (!userBase) {
-      throw new Error('UserBase not initialized');
-    }
-
-    await userBase.ready();
-    const user = await userBase.getUserData();
-
-    let rooms = [];
-
-    // If user has rooms data, use it
-    if (user.rooms && Array.isArray(user.rooms)) {
-      rooms = user.rooms;
-    }
-
-    // Initialize any rooms that aren't already loaded
-    for (const room of rooms) {
-      if (!roomBases[room.id]) {
-        await initializeRoom(room.id);
-      }
-    }
-
-    // Send response
-    const response = {
-      success: true,
-      rooms: rooms
-    };
-
-    const req = rpc.request('roomsList');
-    req.send(JSON.stringify(response));
-
-  } catch (error) {
-    console.error('Error getting rooms:', error);
-    const response = {
-      success: false,
-      error: error.message || 'Unknown error getting rooms',
-      rooms: []
-    };
-
-    const req = rpc.request('roomsList');
-    req.send(JSON.stringify(response));
-  }
-};
-
 // Initialize an existing room
 const initializeRoom = async (roomId) => {
   try {
@@ -576,6 +536,52 @@ const sendMessage = async (messageData) => {
   }
 };
 
+// Get all rooms the user is part of
+const getRooms = async () => {
+  try {
+    if (!userBase) {
+      throw new Error('UserBase not initialized');
+    }
+
+    await userBase.ready();
+    const user = await userBase.getUserData();
+
+    let rooms = [];
+
+    // If user has rooms data, use it
+    if (user.rooms && Array.isArray(user.rooms)) {
+      rooms = user.rooms;
+    }
+
+    // Initialize any rooms that aren't already loaded
+    for (const room of rooms) {
+      if (!roomBases[room.id]) {
+        await initializeRoom(room.id);
+      }
+    }
+
+    // Send response
+    const response = {
+      success: true,
+      rooms: rooms
+    };
+
+    const req = rpc.request('roomsList');
+    req.send(JSON.stringify(response));
+
+  } catch (error) {
+    console.error('Error getting rooms:', error);
+    const response = {
+      success: false,
+      error: error.message || 'Unknown error getting rooms',
+      rooms: []
+    };
+
+    const req = rpc.request('roomsList');
+    req.send(JSON.stringify(response));
+  }
+};
+
 const teardown = async () => {
   console.log('Tearing down backend...');
 
@@ -611,4 +617,11 @@ const teardown = async () => {
   }
 
   console.log('Backend teardown complete');
+}
+
+if (!isBackendInitialized) {
+  isBackendInitialized = true;
+  // Send initialization complete signal
+  const initReq = rpc.request('backendInitialized');
+  initReq.send(JSON.stringify({ success: true }));
 }

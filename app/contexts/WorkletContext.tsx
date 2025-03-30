@@ -12,6 +12,7 @@ export interface WorkletContextType {
   worklet: Worklet | null;
   rpcClient: any;
   isInitialized: boolean;
+  isBackendReady: boolean;
   isLoading: boolean;
   error: Error | null;
   generateSeedPhrase: () => Promise<string[]>;
@@ -40,7 +41,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
   const [isInitialized, setIsInitialized] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
-
+  const [isBackendReady, setIsBackendReady] = useState(false);
   // Callbacks for updating rooms and messages - will be set by ChatContext
   const [updateRooms, setUpdateRooms] = useState<((rooms: Room[]) => void) | undefined>(undefined);
   const [updateMessages, setUpdateMessages] = useState<((messages: Message[]) => void) | undefined>(undefined);
@@ -132,8 +133,10 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
                 const parsedData = JSON.parse(data);
                 console.log('Room created:', parsedData);
 
-                if (parsedData.success && parsedData.room && onRoomCreated) {
-                  onRoomCreated(parsedData.room);
+                if (parsedData.success && parsedData.room) {
+                  // Instead of calling a separate handler, request updated user info
+                  const userCheckRequest = client.request('checkUserExists');
+                  userCheckRequest.send("");
                 }
               } catch (e) {
                 console.error('Error handling roomCreated:', e);
@@ -273,6 +276,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     worklet,
     isInitialized,
     isLoading,
+    isBackendReady,
     error,
     generateSeedPhrase,
     confirmSeedPhrase,

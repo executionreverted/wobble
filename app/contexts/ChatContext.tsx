@@ -47,6 +47,12 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     }
   }, [isInitialized, rpcClient]);
 
+  useEffect(() => {
+    if (user && user.rooms) {
+      setRooms(user.rooms);
+    }
+  }, [user]);
+
   // Callback handlers for WorkletContext
   const handleUpdateRooms = useCallback((updatedRooms: Room[]) => {
     setRooms(updatedRooms);
@@ -115,9 +121,6 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
 
       const request = rpcClient.request('createRoom');
       await request.send(JSON.stringify(roomData));
-
-      // The response will be handled by the RPC event handler in WorkletContext
-      // For now, we'll just return success
       return { success: true, roomId: 'pending' };
     } catch (error) {
       console.error('Error creating room:', error);
