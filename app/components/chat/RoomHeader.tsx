@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS } from '../../utils/constants';
@@ -61,7 +61,10 @@ const RoomHeader: React.FC<RoomHeaderProps> = ({ roomId, roomName }) => {
 
   // Function to handle generating an invite code
   const handleShareRoom = async () => {
-    if (!roomId || !rpcClient) return;
+    if (!roomId || !rpcClient) {
+      Alert.alert('Error', 'Cannot generate invite at this time');
+      return;
+    }
 
     // If we already have an invite code, just show the modal
     if (inviteCode) {
@@ -70,10 +73,13 @@ const RoomHeader: React.FC<RoomHeaderProps> = ({ roomId, roomName }) => {
     }
 
     try {
+      console.log('Generating invite for room:', roomId);
       setIsGenerating(true);
+
       // Request invite code from backend
       const request = rpcClient.request('generateRoomInvite');
       await request.send(JSON.stringify({ roomId }));
+      console.log('Invite generation request sent');
 
       // The response will come through the onInviteGenerated callback
 
@@ -82,11 +88,13 @@ const RoomHeader: React.FC<RoomHeaderProps> = ({ roomId, roomName }) => {
         if (isGenerating) {
           console.log('Invite generation timed out');
           setIsGenerating(false);
+          Alert.alert('Error', 'Failed to generate invite code. Please try again.');
         }
-      }, 5000);
+      }, 10000);
     } catch (error) {
       console.error('Error generating invite code:', error);
       setIsGenerating(false);
+      Alert.alert('Error', 'Failed to generate invite code. Please try again.');
     }
   };
 
@@ -104,6 +112,11 @@ const RoomHeader: React.FC<RoomHeaderProps> = ({ roomId, roomName }) => {
 };
 
 const styles = StyleSheet.create({
+  roomTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.textPrimary,
+  },
   shareButton: {
     marginRight: 16,
     padding: 4,

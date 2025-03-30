@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,11 +7,12 @@ import {
   Modal,
   Share,
   Platform,
-  Clipboard,
-  Alert
+  Alert,
+  ActivityIndicator
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { COLORS } from '../../utils/constants';
+import * as Clipboard from 'expo-clipboard';
 
 interface ShareRoomProps {
   visible: boolean;
@@ -27,43 +28,73 @@ const ShareRoomModal: React.FC<ShareRoomProps> = ({
   roomName
 }) => {
   const [copied, setCopied] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Reset copied state when modal opens/closes
+  useEffect(() => {
+    if (visible) {
+      setCopied(false);
+    }
+  }, [visible]);
 
   const handleCopyInvite = async () => {
+    if (!inviteCode) {
+      Alert.alert('Error', 'No invite code available');
+      return;
+    }
+
     try {
+      setIsLoading(true);
+
       if (Platform.OS === 'web') {
-        await navigator.clipboard.writeText(inviteCode);
+        if (navigator.clipboard) {
+          await navigator.clipboard.writeText(inviteCode);
+        } else {
+          throw new Error('Clipboard not available');
+        }
       } else {
-        await Clipboard.setString(inviteCode);
+        await Clipboard.setStringAsync(inviteCode);
       }
+
       setCopied(true);
-      setTimeout(() => setCopied(false), 3000);
       Alert.alert('Success', 'Invite code copied to clipboard');
+
+      // Reset copied state after 3 seconds
+      setTimeout(() => setCopied(false), 3000);
     } catch (error) {
       console.error('Error copying to clipboard:', error);
       Alert.alert('Error', 'Failed to copy invite code');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleShareInvite = async () => {
+    if (!inviteCode) {
+      Alert.alert('Error', 'No invite code available');
+      return;
+    }
+
     try {
+      setIsLoading(true);
       const result = await Share.share({
         message: `Join my Roombase chat room "${roomName}" with this invite code: ${inviteCode}`,
         title: `Join ${roomName} on Roombase`
       });
 
       if (result.action === Share.sharedAction) {
-        if (result.activityType) {
-          // shared with activity type of result.activityType
-        } else {
-          // shared
-        }
-      } else if (result.action === Share.dismissedAction) {
-        // dismissed
+        console.log('Successfully shared invite code');
       }
     } catch (error) {
-      Alert.alert('Error', 'Error sharing invite code');
+      console.error('Error sharing invite code:', error);
+      Alert.alert('Error', 'Failed to share invite code');
+    } finally {
+      setIsLoading(false);
     }
   };
+
+  // Check if there's an invite code to display
+  const hasInviteCode = !!inviteCode && inviteCode.length > 0;
 
   return (
     <Modal
@@ -82,41 +113,80 @@ const ShareRoomModal: React.FC<ShareRoomProps> = ({
           </View>
 
           <View style={styles.contentContainer}>
-            <Text style={styles.roomName}>{roomName}</Text>
+            <Text style={styles.roomName}>#{roomName}</Text>
 
-            <View style={styles.inviteCodeContainer}>
-              <Text style={styles.inviteCodeLabel}>Invite Code:</Text>
-              <Text style={styles.inviteCode} numberOfLines={2} ellipsizeMode="middle">
-                {inviteCode}
-              </Text>
-            </View>
+            {!hasInviteCode ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color={COLORS.primary} />
+                <Text style={styles.loadingText}>Generating invite code...</Text>
+              </View>
+            ) : (
+              <>
+                <View style={styles.inviteCodeContainer}>
+                  <Text style={styles.inviteCodeLabel}>Invite Code:</Text>
+                  <TouchableOpacity
+                    style={styles.codeWrapper}
+                    activeOpacity={0.7}
+                    onPress={handleCopyInvite}
+                  >
+                    <Text style={styles.inviteCode} selectable={true}>
+                      {inviteCode}
+                    </Text>
+                    <MaterialIcons
+                      name="content-copy"
+                      size={20}
+                      color={COLORS.primary}
+                      style={styles.copyIcon}
+                    />
+                  </TouchableOpacity>
+                </View>
 
-            <Text style={styles.instructionText}>
-              Share this invite code with people you want to join this room.
-              Anyone with this code can join the room.
-            </Text>
-
-            <View style={styles.buttonContainer}>
-              <TouchableOpacity
-                style={styles.actionButton}
-                onPress={handleCopyInvite}
-              >
-                <MaterialIcons name="content-copy" size={24} color={COLORS.textPrimary} />
-                <Text style={styles.actionButtonText}>
-                  {copied ? 'Copied!' : 'Copy Code'}
+                <Text style={styles.instructionText}>
+                  Share this invite code with people you want to join this room.
+                  Anyone with this code can join the room.
                 </Text>
-              </TouchableOpacity>
 
-              {Platform.OS !== 'web' && (
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.shareButton]}
-                  onPress={handleShareInvite}
-                >
-                  <MaterialIcons name="share" size={24} color={COLORS.textPrimary} />
-                  <Text style={styles.actionButtonText}>Share</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+                <View style={styles.buttonContainer}>
+                  <TouchableOpacity
+                    style={[styles.actionButton, copied && styles.copiedButton]}
+                    onPress={handleCopyInvite}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? (
+                      <ActivityIndicator size="small" color={COLORS.textPrimary} />
+                    ) : (
+                      <>
+                        <MaterialIcons
+                          name={copied ? "check" : "content-copy"}
+                          size={24}
+                          color={COLORS.textPrimary}
+                        />
+                        <Text style={styles.actionButtonText}>
+                          {copied ? 'Copied!' : 'Copy Code'}
+                        </Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+
+                  {Platform.OS !== 'web' && (
+                    <TouchableOpacity
+                      style={[styles.actionButton, styles.shareButton]}
+                      onPress={handleShareInvite}
+                      disabled={isLoading}
+                    >
+                      {isLoading ? (
+                        <ActivityIndicator size="small" color={COLORS.textPrimary} />
+                      ) : (
+                        <>
+                          <MaterialIcons name="share" size={24} color={COLORS.textPrimary} />
+                          <Text style={styles.actionButtonText}>Share</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </>
+            )}
           </View>
         </View>
       </View>
@@ -129,7 +199,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
   },
   modalContent: {
     backgroundColor: COLORS.background,
@@ -137,6 +207,11 @@ const styles = StyleSheet.create({
     width: '90%',
     maxWidth: 400,
     paddingBottom: 24,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -152,17 +227,29 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
   },
   closeButton: {
-    padding: 4,
+    padding: 8,
+    borderRadius: 20,
   },
   contentContainer: {
     padding: 20,
+    minHeight: 200,
   },
   roomName: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
     color: COLORS.primary,
-    marginBottom: 16,
+    marginBottom: 20,
     textAlign: 'center',
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: COLORS.textSecondary,
   },
   inviteCodeContainer: {
     backgroundColor: COLORS.secondaryBackground,
@@ -173,22 +260,32 @@ const styles = StyleSheet.create({
   inviteCodeLabel: {
     fontSize: 14,
     color: COLORS.textSecondary,
-    marginBottom: 8,
+    marginBottom: 10,
+    fontWeight: '500',
+  },
+  codeWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.tertiaryBackground,
+    borderRadius: 6,
+    padding: 12,
+    paddingVertical: 14,
   },
   inviteCode: {
+    flex: 1,
     fontSize: 16,
     color: COLORS.textPrimary,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    padding: 8,
-    backgroundColor: COLORS.tertiaryBackground,
-    borderRadius: 4,
-    overflow: 'hidden',
+  },
+  copyIcon: {
+    marginLeft: 8,
   },
   instructionText: {
     fontSize: 14,
     color: COLORS.textSecondary,
     marginBottom: 24,
     textAlign: 'center',
+    lineHeight: 20,
   },
   buttonContainer: {
     flexDirection: 'row',
@@ -197,12 +294,15 @@ const styles = StyleSheet.create({
   actionButton: {
     backgroundColor: COLORS.primary,
     borderRadius: 8,
-    padding: 12,
+    padding: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     flex: 1,
     marginHorizontal: 8,
+  },
+  copiedButton: {
+    backgroundColor: COLORS.success,
   },
   shareButton: {
     backgroundColor: COLORS.primaryDark,
@@ -211,6 +311,7 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     fontWeight: 'bold',
     marginLeft: 8,
+    fontSize: 16,
   },
 });
 

@@ -142,6 +142,28 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
               }
             }
 
+            if (req.command === 'roomInviteGenerated') {
+              try {
+                const data = b4a.toString(req.data);
+                const parsedData = JSON.parse(data);
+                console.log('Room invite generated:', parsedData);
+
+                if (parsedData.success && parsedData.roomId && parsedData.inviteCode) {
+                  // Call the callback with room ID and invite code
+                  if (onInviteGenerated) {
+                    console.log('Calling onInviteGenerated with:', parsedData.roomId, parsedData.inviteCode);
+                    onInviteGenerated(parsedData.roomId, parsedData.inviteCode);
+                  } else {
+                    console.log('No onInviteGenerated callback registered');
+                  }
+                } else {
+                  console.error('Invalid invite response:', parsedData);
+                }
+              } catch (e) {
+                console.error('Error handling roomInviteGenerated:', e);
+              }
+            }
+
 
             if (req.command === 'roomCreated') {
               try {
@@ -196,6 +218,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
               }
             }
 
+
             if (req.command === 'roomJoinResult') {
               try {
                 const data = b4a.toString(req.data);
@@ -218,6 +241,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
                 console.error('Error handling roomJoinResult:', e);
               }
             }
+
 
             if (req.command === 'roomMessages') {
               try {

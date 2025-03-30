@@ -125,9 +125,32 @@ const rpc = new RPC(IPC, (req, error) => {
   }
 
   if (req.command === 'generateRoomInvite') {
-    const data = b4a.toString(req.data);
-    const parsedData = JSON.parse(data);
-    generateRoomInvite(parsedData.roomId);
+    try {
+      const data = b4a.toString(req.data);
+      const parsedData = JSON.parse(data);
+      console.log('Received generateRoomInvite request for roomId:', parsedData.roomId);
+
+      if (!parsedData.roomId) {
+        console.error('Missing roomId in generateRoomInvite request');
+        const response = {
+          success: false,
+          error: 'Missing roomId parameter'
+        };
+        const errorReq = rpc.request('roomInviteGenerated');
+        errorReq.send(JSON.stringify(response));
+        return;
+      }
+
+      generateRoomInvite(parsedData.roomId);
+    } catch (error) {
+      console.error('Error parsing generateRoomInvite request:', error);
+      const response = {
+        success: false,
+        error: 'Invalid request format'
+      };
+      const errorReq = rpc.request('roomInviteGenerated');
+      errorReq.send(JSON.stringify(response));
+    }
   }
 
   if (req.command === 'generateSeed') {
