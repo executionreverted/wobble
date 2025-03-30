@@ -38,11 +38,11 @@ const Home = () => {
       {/* Header with user greeting */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.greeting}>Hello, {user?.username || 'User'}</Text>
+          <Text style={styles.greeting}>Hello, {user?.name || 'User'}</Text>
           <Text style={styles.subGreeting}>Welcome to roombase</Text>
         </View>
         <View style={styles.userAvatar}>
-          <Text style={styles.userInitial}>{user?.username?.[0]?.toUpperCase() || 'U'}</Text>
+          <Text style={styles.userInitial}>{user?.name?.[0]?.toUpperCase() || 'U'}</Text>
         </View>
       </View>
 
