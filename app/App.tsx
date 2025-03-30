@@ -80,7 +80,7 @@ const AppNavigator = () => {
 
       return () => clearTimeout(timer);
     }
-  }, [isInitialized, isLoading]);
+  }, [isInitialized, isLoading, isBackendReady]);
 
 
   useEffect(() => {

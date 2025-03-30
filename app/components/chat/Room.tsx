@@ -1,323 +1,376 @@
-import React, { useCallback, useReducer } from 'react'
-import { Alert, Linking, Platform, StyleSheet, Text, View } from 'react-native'
-import { MaterialIcons } from '@expo/vector-icons'
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  GiftedChat,
-  IMessage,
-  Send,
-  SendProps,
-  SystemMessage,
-} from 'react-native-gifted-chat'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import NavBar from '../common/NavBar'
-import AccessoryBar from '../common/AccessoryBar'
-import CustomActions from '../common/CustomActions'
-import CustomView from '../common/CustomView'
-import earlierMessages from '../../utils/dummy/earlierMessages'
-import messagesData from '../../utils/dummy/messages'
-import * as Clipboard from 'expo-clipboard'
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  TextInput,
+  TouchableOpacity,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator
+} from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import { useChat } from '../../hooks/useChat';
+import { COLORS } from '../../utils/constants';
+import useUser from '../../hooks/useUser';
+import { formatTimestamp } from '../../utils/helpers';
 
+// Message component to render each chat message
+const MessageItem = ({ message, isOwnMessage }: any) => {
+  return (
+    <View style={[
+      styles.messageContainer,
+      isOwnMessage ? styles.ownMessageContainer : styles.otherMessageContainer
+    ]}>
+      {!isOwnMessage && (
+        <Text style={styles.messageSender}>{message.sender}</Text>
+      )}
 
+      <View style={[
+        styles.messageContent,
+        isOwnMessage ? styles.ownMessageContent : styles.otherMessageContent
+      ]}>
+        <Text style={styles.messageText}>{message.content}</Text>
+      </View>
 
-const user = {
-  _id: 1,
-  name: 'Developer',
-}
+      <Text style={[
+        styles.messageTimestamp,
+        isOwnMessage ? styles.ownMessageTimestamp : styles.otherMessageTimestamp
+      ]}>
+        {formatTimestamp(message.timestamp)}
+      </Text>
+    </View>
+  );
+};
 
-// const otherUser = {
-//   _id: 2,
-//   name: 'React Native',
-//   avatar: 'https://facebook.github.io/react/img/logo_og.png',
-// }
+// System message component
+const SystemMessage = ({ message }: any) => {
+  return (
+    <View style={styles.systemMessageContainer}>
+      <Text style={styles.systemMessageText}>{message.content}</Text>
+      <Text style={styles.systemMessageTimestamp}>
+        {formatTimestamp(message.timestamp)}
+      </Text>
+    </View>
+  );
+};
 
-interface IState {
-  messages: any[]
-  step: number
-  loadEarlier?: boolean
-  isLoadingEarlier?: boolean
-  isTyping: boolean
-}
+// Date header component to show date separators
+const DateHeader = ({ date }: any) => {
+  return (
+    <View style={styles.dateHeaderContainer}>
+      <View style={styles.dateHeaderLine} />
+      <Text style={styles.dateHeaderText}>{date}</Text>
+      <View style={styles.dateHeaderLine} />
+    </View>
+  );
+};
 
-enum ActionKind {
-  SEND_MESSAGE = 'SEND_MESSAGE',
-  LOAD_EARLIER_MESSAGES = 'LOAD_EARLIER_MESSAGES',
-  LOAD_EARLIER_START = 'LOAD_EARLIER_START',
-  SET_IS_TYPING = 'SET_IS_TYPING',
-  // LOAD_EARLIER_END = 'LOAD_EARLIER_END',
-}
+const EnhancedChatRoom = () => {
+  const { currentRoom, messages, sendMessage } = useChat();
+  const { user } = useUser();
+  const [messageText, setMessageText] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const navigation = useNavigation();
+  const route = useRoute();
+  const insets = useSafeAreaInsets();
+  const flatListRef = useRef(null);
 
-// An interface for our actions
-interface StateAction {
-  type: ActionKind
-  payload?: any
-}
-
-function reducer(state: IState, action: StateAction) {
-  switch (action.type) {
-    case ActionKind.SEND_MESSAGE: {
-      return {
-        ...state,
-        step: state.step + 1,
-        messages: action.payload,
-      }
+  // Set room name in header
+  useEffect(() => {
+    if (currentRoom) {
+      navigation.setOptions({
+        title: `#${currentRoom.name}`,
+      });
     }
-    case ActionKind.LOAD_EARLIER_MESSAGES: {
-      return {
-        ...state,
-        loadEarlier: true,
-        isLoadingEarlier: false,
-        messages: action.payload,
-      }
+  }, [currentRoom, navigation]);
+
+  // Simulate loading state
+  useEffect(() => {
+    // Set loading to false after messages are loaded or after 2 seconds
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Function to handle sending a message
+  const handleSendMessage = async () => {
+    if (!messageText.trim()) return;
+
+    try {
+      await sendMessage(messageText.trim());
+      setMessageText('');
+    } catch (error) {
+      console.error('Error sending message:', error);
     }
-    case ActionKind.LOAD_EARLIER_START: {
-      return {
-        ...state,
-        isLoadingEarlier: true,
-      }
+  };
+
+  // Function to render each message
+  const renderItem = ({ item }: any) => {
+    // If the message is a system message
+    if (item.system) {
+      return <SystemMessage message={item} />;
     }
-    case ActionKind.SET_IS_TYPING: {
-      return {
-        ...state,
-        isTyping: action.payload,
-      }
-    }
-  }
-}
 
-const Room = () => {
-  const [state, dispatch] = useReducer(reducer, {
-    messages: messagesData,
-    step: 0,
-    loadEarlier: true,
-    isLoadingEarlier: false,
-    isTyping: false,
-  })
+    // Check if the message is from the current user
+    const isOwnMessage = user && item.sender === user.name;
 
-  const onSend = useCallback(
-    (messages: any[]) => {
-      const sentMessages = [{ ...messages[0], sent: true, received: true }]
-      const newMessages = GiftedChat.append(
-        state.messages,
-        sentMessages,
-        Platform.OS !== 'web'
-      )
+    return (
+      <MessageItem
+        message={item}
+        isOwnMessage={isOwnMessage}
+      />
+    );
+  };
 
-      dispatch({ type: ActionKind.SEND_MESSAGE, payload: newMessages })
-    },
-    [dispatch, state.messages]
-  )
+  // Function to load more messages (previous/older messages)
+  const handleLoadMore = useCallback(() => {
+    if (isLoadingMore) return;
 
-  const onLoadEarlier = useCallback(() => {
-    dispatch({ type: ActionKind.LOAD_EARLIER_START })
+    setIsLoadingMore(true);
+    // This would connect to your actual load more functionality
+    // For now, we'll just simulate a delay
     setTimeout(() => {
-      const newMessages = GiftedChat.prepend(
-        state.messages,
-        earlierMessages() as IMessage[],
-        Platform.OS !== 'web'
-      )
+      setIsLoadingMore(false);
+    }, 1500);
+  }, [isLoadingMore]);
 
-      dispatch({ type: ActionKind.LOAD_EARLIER_MESSAGES, payload: newMessages })
-    }, 1500) // simulating network
-    // }, 15000) // for debug with long loading
-  }, [dispatch, state.messages])
+  // Render the loading indicator for older messages
+  const renderFooter = () => {
+    if (!isLoadingMore) return null;
 
-  const parsePatterns = useCallback(() => {
-    return [
-      {
-        pattern: /#(\w+)/,
-        style: { textDecorationLine: 'underline', color: 'darkorange' },
-        onPress: () => Linking.openURL('http://gifted.chat'),
-      },
-    ]
-  }, [])
-
-  const onLongPressAvatar = useCallback((pressedUser: any) => {
-    Alert.alert(JSON.stringify(pressedUser))
-  }, [])
-
-  const onPressAvatar = useCallback(() => {
-    Alert.alert('On avatar press')
-  }, [])
-
-  const handleLongPress = useCallback((context: unknown, currentMessage: any) => {
-    if (!currentMessage.text)
-      return
-
-    const options = [
-      'Copy text',
-      'Cancel',
-    ]
-
-    const cancelButtonIndex = options.length - 1
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ; (context as any).actionSheet().showActionSheetWithOptions(
-        {
-          options,
-          cancelButtonIndex,
-        },
-        (buttonIndex: number) => {
-          switch (buttonIndex) {
-            case 0:
-              Clipboard.setStringAsync(currentMessage?.text as any)
-              break
-            default:
-              break
-          }
-        }
-      )
-  }, [])
-
-  const onQuickReply = useCallback((replies: any[]) => {
-    const createdAt = new Date()
-    if (replies.length === 1)
-      onSend([
-        {
-          createdAt,
-          _id: Math.round(Math.random() * 1000000),
-          text: replies[0].title,
-          user,
-        },
-      ])
-    else if (replies.length > 1)
-      onSend([
-        {
-          createdAt,
-          _id: Math.round(Math.random() * 1000000),
-          text: replies.map(reply => reply.title).join(', '),
-          user,
-        },
-      ])
-    else
-      console.warn('replies param is not set correctly')
-  }, [])
-
-  const renderQuickReplySend = useCallback(() => {
-    return <Text>{' custom send =>'}</Text>
-  }, [])
-
-  const setIsTyping = useCallback(
-    (isTyping: boolean) => {
-      dispatch({ type: ActionKind.SET_IS_TYPING, payload: isTyping })
-    },
-    [dispatch]
-  )
-
-  const onSendFromUser = useCallback(
-    (messages: IMessage[] = []) => {
-      const createdAt = new Date()
-      const messagesToUpload = messages.map(message => ({
-        ...message,
-        user,
-        createdAt,
-        _id: Math.round(Math.random() * 1000000),
-      }))
-
-      onSend(messagesToUpload)
-    },
-    [onSend]
-  )
-
-  const renderAccessory = useCallback(() => {
     return (
-      <AccessoryBar
-        onSend={onSendFromUser}
-        isTyping={() => setIsTyping(!state.isTyping)}
-      />
-    )
-  }, [onSendFromUser, setIsTyping, state.isTyping])
+      <View style={styles.loadingMoreContainer}>
+        <ActivityIndicator size="small" color={COLORS.primary} />
+        <Text style={styles.loadingMoreText}>Loading older messages...</Text>
+      </View>
+    );
+  };
 
-  const renderCustomActions = useCallback(
-    (props: any) =>
-      Platform.OS === 'web'
-        ? null
-        : (
-          <CustomActions {...props} onSend={onSendFromUser} />
-        ),
-    [onSendFromUser]
-  )
-
-  const renderSystemMessage = useCallback((props: any) => {
+  // Show loading state if messages are still loading
+  if (isLoading) {
     return (
-      <SystemMessage
-        {...props}
-        containerStyle={{
-          marginBottom: 15,
-        }}
-        textStyle={{
-          fontSize: 14,
-        }}
-      />
-    )
-  }, [])
-
-  const renderCustomView = useCallback((props: any) => {
-    return <CustomView {...props} />
-  }, [])
-
-  const renderSend = useCallback((props: SendProps<IMessage>) => {
-    return (
-      <Send {...props} containerStyle={{ justifyContent: 'center', paddingHorizontal: 10 }}>
-        <MaterialIcons size={30} color={'tomato'} name={'send'} />
-      </Send>
-    )
-  }, [])
-
-  const insets = useSafeAreaInsets()
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Loading messages...</Text>
+      </View>
+    );
+  }
 
   return (
-    <>
-      <NavBar />
-      <View style={[styles.fill, styles.content]}>
-        <GiftedChat
-          messages={state.messages}
-          onSend={onSend}
-          loadEarlier={state.loadEarlier}
-          onLoadEarlier={onLoadEarlier}
-          isLoadingEarlier={state.isLoadingEarlier}
-          parsePatterns={parsePatterns}
-          user={user}
-          isScrollToBottomEnabled
-          onPressAvatar={onPressAvatar}
-          onLongPressAvatar={onLongPressAvatar}
-          onLongPress={handleLongPress}
-          onQuickReply={onQuickReply}
-          quickReplyStyle={{ borderRadius: 2 }}
-          quickReplyTextStyle={{
-            fontWeight: '200',
-          }}
-          renderQuickReplySend={renderQuickReplySend}
-          renderAccessory={renderAccessory}
-          renderActions={renderCustomActions}
-          renderSystemMessage={renderSystemMessage}
-          renderCustomView={renderCustomView}
-          renderSend={renderSend}
-          keyboardShouldPersistTaps='never'
-          timeTextStyle={{
-            left: { color: 'red' },
-            right: { color: 'yellow' },
-          }}
-          isTyping={state.isTyping}
-          inverted={Platform.OS !== 'web'}
-          infiniteScroll
-          bottomOffset={-insets.bottom}
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+    >
+      <FlatList
+        ref={flatListRef}
+        data={messages}
+        renderItem={renderItem}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.messagesList}
+        inverted={true} // Display newest messages at the bottom
+        onEndReached={handleLoadMore}
+        onEndReachedThreshold={0.5}
+        ListFooterComponent={renderFooter}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <MaterialIcons name="forum" size={48} color={COLORS.textMuted} />
+            <Text style={styles.emptyText}>No messages yet. Be the first to send a message!</Text>
+          </View>
+        }
+      />
+
+      <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+        <TextInput
+          style={styles.input}
+          value={messageText}
+          onChangeText={setMessageText}
+          placeholder="Type a message..."
+          placeholderTextColor={COLORS.textMuted}
+          multiline
+          maxLength={1000}
         />
+        <TouchableOpacity
+          style={[
+            styles.sendButton,
+            !messageText.trim() && styles.disabledButton
+          ]}
+          onPress={handleSendMessage}
+          disabled={!messageText.trim()}
+        >
+          <MaterialIcons
+            name="send"
+            size={24}
+            color={messageText.trim() ? COLORS.textPrimary : COLORS.textMuted}
+          />
+        </TouchableOpacity>
       </View>
-    </>
-  )
-}
+    </KeyboardAvoidingView>
+  );
+};
 
 const styles = StyleSheet.create({
-  fill: {
-    flex: 1,
-  },
   container: {
-    backgroundColor: '#f5f5f5',
+    flex: 1,
+    backgroundColor: COLORS.background,
   },
-  content: {
-    backgroundColor: '#ffffff',
+  messagesList: {
+    flexGrow: 1,
+    paddingHorizontal: 16,
+    paddingTop: 10,
   },
-})
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: COLORS.textSecondary,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 30,
+  },
+  emptyText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+  },
+  messageContainer: {
+    marginVertical: 6,
+    maxWidth: '80%',
+    alignSelf: 'flex-start',
+  },
+  ownMessageContainer: {
+    alignSelf: 'flex-end',
+  },
+  otherMessageContainer: {
+    alignSelf: 'flex-start',
+  },
+  messageSender: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    marginBottom: 2,
+  },
+  messageContent: {
+    padding: 10,
+    borderRadius: 16,
+  },
+  ownMessageContent: {
+    backgroundColor: COLORS.primary,
+    borderBottomRightRadius: 4,
+  },
+  otherMessageContent: {
+    backgroundColor: COLORS.secondaryBackground,
+    borderBottomLeftRadius: 4,
+  },
+  messageText: {
+    fontSize: 15,
+    color: COLORS.textPrimary,
+    lineHeight: 20,
+  },
+  messageTimestamp: {
+    fontSize: 10,
+    marginTop: 2,
+    alignSelf: 'flex-end',
+    color: COLORS.textMuted,
+  },
+  ownMessageTimestamp: {
+    color: COLORS.textSecondary,
+  },
+  otherMessageTimestamp: {
+    color: COLORS.textMuted,
+  },
+  systemMessageContainer: {
+    alignSelf: 'center',
+    marginVertical: 10,
+    backgroundColor: 'rgba(114, 137, 218, 0.1)',
+    padding: 8,
+    borderRadius: 12,
+    marginHorizontal: 40,
+  },
+  systemMessageText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+  },
+  systemMessageTimestamp: {
+    fontSize: 10,
+    color: COLORS.textMuted,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  dateHeaderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 16,
+  },
+  dateHeaderLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: COLORS.separator,
+  },
+  dateHeaderText: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginHorizontal: 10,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    backgroundColor: COLORS.secondaryBackground,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.separator,
+    alignItems: 'center',
+  },
+  input: {
+    flex: 1,
+    backgroundColor: COLORS.input,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    maxHeight: 100,
+    color: COLORS.textPrimary,
+    fontSize: 15,
+  },
+  sendButton: {
+    marginLeft: 10,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  disabledButton: {
+    backgroundColor: COLORS.tertiaryBackground,
+  },
+  loadingMoreContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  loadingMoreText: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginLeft: 8,
+  },
+});
 
-
-export default Room
+export default EnhancedChatRoom;

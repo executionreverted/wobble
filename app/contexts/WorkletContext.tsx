@@ -76,7 +76,6 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
               }
             }
 
-
             if (req.command === 'seedGenerated') {
               try {
                 const data = b4a.toString(req.data);
@@ -305,42 +304,6 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       // The result will be processed in the RPC event handler
       // and will update the backend state through the 'backendInitialized' event
       setIsBackendReady(false);
-
-      // Wait for backend to be reinitialized
-      return new Promise((resolve) => {
-        // Create a temporary handler for the backendInitialized event
-        const originalHandler = rpcClient._handlers.backendInitialized;
-
-        rpcClient._handlers.backendInitialized = (req: any) => {
-          // Call the original handler first
-          if (originalHandler) {
-            originalHandler(req);
-          }
-
-          try {
-            const data = b4a.toString(req.data);
-            const parsedData = JSON.parse(data);
-
-            if (parsedData.success) {
-              console.log('Backend reinitialized successfully');
-              setIsBackendReady(true);
-              setIsLoading(false);
-              resolve(true);
-            } else {
-              console.error('Backend reinitialization failed:', parsedData.error);
-              setIsLoading(false);
-              resolve(false);
-            }
-          } catch (e) {
-            console.error('Error handling backendInitialized:', e);
-            setIsLoading(false);
-            resolve(false);
-          }
-
-          // Restore the original handler
-          rpcClient._handlers.backendInitialized = originalHandler;
-        };
-      });
 
     } catch (err) {
       console.error('Failed to reinitialize backend:', err);

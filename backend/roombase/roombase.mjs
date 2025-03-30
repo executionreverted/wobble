@@ -9,11 +9,10 @@ import z32 from 'z32';
 import b4a from 'b4a';
 import { Router, dispatch } from './spec/hyperdispatch/index.mjs';
 import db from './spec/db/index.mjs';
-import crypto from 'bare-crypto';
 import { getEncoding } from './spec/hyperdispatch/messages.mjs';
 import fs from 'bare-fs';
 import path from 'bare-path';
-import { sanitizeTextForTerminal } from '../utils.mjs';
+import { generateUUID, sanitizeTextForTerminal } from '../utils.mjs';
 import Hypercore from 'hypercore';
 
 
@@ -129,7 +128,7 @@ class RoomBase extends ReadyResource {
     this.replicate = opts.replicate !== false;
 
     // Room properties
-    this.roomId = opts.roomId || crypto.randomUUID();
+    this.roomId = opts.roomId || generateUUID();
     this.roomName = opts.roomName || 'Unnamed Room';
     this.messageListeners = [];
 
@@ -864,29 +863,135 @@ class RoomBase extends ReadyResource {
     this.blobCore = opts.blobCore
   }
 
-  /**
-   * Static method to join a room using an invite code
-   */
-  static async joinRoom(store, inviteCode, opts = {}) {
-    if (!store) throw new Error('Corestore is required');
-    if (!inviteCode) throw new Error('Invite code is required');
+  // Function to join a room by invite code - with consistent room ID
+  async joinRoomByInvite(inviteCode) {
+    if (!userBase || !userCorestore) {
+      return { success: false, error: 'User not initialized' };
+    }
 
     try {
-      // Create pairing instance
-      const pair = RoomBase.pair(store, inviteCode, opts);
+      // Generate a unique room ID that will be used for the directory and references
+      const roomId = `room_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
-      // Wait for pairing to complete
-      const room = await pair.finished();
+      // Create corestore directory for the new room
+      const joinRoomDir = `${roomBasePath}/${roomId}`;
+      if (!fs.existsSync(joinRoomDir)) {
+        fs.mkdirSync(joinRoomDir, { recursive: true });
+      }
 
-      // Wait for room to be fully ready
+      const roomCorestore = new Corestore(joinRoomDir);
+      await roomCorestore.ready();
+
+      // Set up blob core and store
+      const blobCore = new Hypercore(joinRoomDir + '/blobs');
+      await blobCore.ready();
+
+      const blobStore = new Hyperblobs(blobCore);
+      await blobStore.ready();
+
+      // Use RoomBase.joinRoom which returns a RoomBase instance
+      const room = await RoomBase.joinRoom(roomCorestore, inviteCode, {
+        blobCore,
+        blobStore
+      });
+
+      // Get room info
       await room.ready();
+      const roomInfo = await room.getRoomInfo();
 
-      return room;
-    } catch (err) {
-      console.error('Error joining room:', err);
-      throw err;
+      if (!roomInfo) {
+        throw new Error('Could not get room information');
+      }
+
+      // Add to room instances directly
+      roomCorestores[roomId] = roomCorestore;
+      roomBases[roomId] = room;
+
+      // Set up message listener if not already set
+      if (!room._hasMessageListener) {
+        room.on('new-message', (msg) => {
+          // Format the message
+          const formattedMessage = {
+            id: msg.id,
+            roomId: roomId,
+            content: msg.content,
+            sender: msg.sender,
+            timestamp: msg.timestamp,
+            system: msg.system || false
+          };
+
+          // Send to client
+          const req = rpc.request('newMessage');
+          req.send(JSON.stringify({
+            success: true,
+            message: formattedMessage
+          }));
+        });
+
+        room._hasMessageListener = true;
+      }
+
+      // Add to user's rooms
+      const user = await userBase.getUserData();
+      let userRooms = [];
+
+      if (user.rooms) {
+        if (typeof user.rooms === 'string') {
+          try {
+            userRooms = JSON.parse(user.rooms);
+          } catch (e) {
+            userRooms = [];
+          }
+        } else if (Array.isArray(user.rooms)) {
+          userRooms = [...user.rooms];
+        }
+      }
+
+      // Create room object with our local ID and remote room info
+      const roomData = {
+        id: roomId, // Use our generated ID
+        name: roomInfo.name,
+        description: `Joined room: ${roomInfo.name}`,
+        createdAt: roomInfo.createdAt,
+        messageCount: roomInfo.messageCount || 0,
+        invite: inviteCode,
+        remoteId: roomInfo.id, // Store the original remote ID
+        key: room.key.toString('hex'),
+        encryptionKey: room.encryptionKey.toString('hex')
+      };
+
+      // Only add if not already in rooms (by local ID)
+      if (!userRooms.some(r => r.id === roomId)) {
+        userRooms.push(roomData);
+
+        // Update user profile with new room
+        await userBase.updateUserProfile({
+          rooms: JSON.stringify(userRooms)
+        });
+
+        // Get updated user data
+        const updatedUser = await userBase.getUserData();
+
+        // Send updated user info back to client
+        const userReq = rpc.request('userInfo');
+        userReq.send(JSON.stringify(updatedUser));
+      }
+
+      return {
+        success: true,
+        room: roomData
+      };
+    } catch (error) {
+      console.error('Error joining room by invite:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to join room'
+      };
     }
-  }
+  };
+
+
+
 }
 
 // Helper function for error handling

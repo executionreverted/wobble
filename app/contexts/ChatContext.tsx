@@ -1,6 +1,5 @@
-import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
+import React, { createContext, useState, useEffect, useCallback } from 'react';
 import { Room, Message, User, ChatContextType } from '../types';
-import { MOCK_ROOMS, MOCK_MESSAGES, MOCK_USERS } from '../utils/constants';
 import useUser from '../hooks/useUser';
 import useWorklet from '../hooks/useWorklet';
 
@@ -14,7 +13,8 @@ const defaultChatContext: ChatContextType = {
   leaveRoom: () => { },
   sendMessage: async () => { },
   refreshRooms: async () => { },
-  createRoom: async () => { return { success: false, roomId: '' } }
+  createRoom: async () => { return { success: false, roomId: '' } },
+  loadMoreMessages: async () => false
 };
 
 export const ChatContext = createContext<ChatContextType>(defaultChatContext);
@@ -32,6 +32,9 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [onlineUsers, setOnlineUsers] = useState<User[]>([]);
+  const [oldestMessageTimestamp, setOldestMessageTimestamp] = useState<number | null>(null);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+  const [hasMoreMessages, setHasMoreMessages] = useState<boolean>(true);
 
   // Initialize rooms from backend when worklet is ready
   useEffect(() => {
@@ -53,13 +56,30 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     }
   }, [user]);
 
+  // Update oldest message timestamp when messages change
+  useEffect(() => {
+    if (messages.length > 0) {
+      // Find the oldest message (smallest timestamp)
+      const oldest = messages.reduce((oldest, current) =>
+        current.timestamp < oldest.timestamp ? current : oldest, messages[0]);
+
+      setOldestMessageTimestamp(oldest.timestamp);
+    } else {
+      setOldestMessageTimestamp(null);
+    }
+  }, [messages]);
+
   // Callback handlers for WorkletContext
   const handleUpdateRooms = useCallback((updatedRooms: Room[]) => {
     setRooms(updatedRooms);
   }, []);
 
-  const handleUpdateMessages = useCallback((newMessages: Message[]) => {
+  const handleUpdateMessages = useCallback((newMessages: Message[], replace = false) => {
     setMessages(prev => {
+      if (replace) {
+        return [...newMessages].sort((a, b) => b.timestamp - a.timestamp); // Sort newest first for inverted FlatList
+      }
+
       // Combine old and new messages, removing duplicates based on id
       const messageMap = new Map();
 
@@ -73,10 +93,15 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         messageMap.set(msg.id, msg);
       });
 
-      // Convert map back to array and sort by timestamp (oldest first)
+      // Convert map back to array and sort by timestamp (newest first for inverted FlatList)
       return Array.from(messageMap.values())
-        .sort((a, b) => a.timestamp - b.timestamp);
+        .sort((a, b) => b.timestamp - a.timestamp);
     });
+
+    // Check if we received the full expected count, if not, there are no more messages
+    if (newMessages.length < 20) { // Assuming 20 per page
+      setHasMoreMessages(false);
+    }
   }, []);
 
   const handleRoomCreated = useCallback((room: Room) => {
@@ -130,8 +155,10 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
 
   // Select a room and join it
   const selectRoom = async (room: Room) => {
-    setCurrentRoom(room);
     setMessages([]); // Clear previous messages
+    setHasMoreMessages(true); // Reset pagination state
+    setOldestMessageTimestamp(null);
+    setCurrentRoom(room);
 
     // Call backend to join room if we have a worklet
     if (rpcClient && isInitialized) {
@@ -144,7 +171,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       }
     }
 
-    // Mock: add user to online users if not already present
+    // Add user to online users if not already present
     if (user && !onlineUsers.find(u => u.id === user.id)) {
       setOnlineUsers(prev => [
         ...prev,
@@ -168,6 +195,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     }
     setCurrentRoom(null);
     setMessages([]);
+    setHasMoreMessages(true);
+    setOldestMessageTimestamp(null);
   };
 
   const sendMessage = async (text: string) => {
@@ -190,6 +219,33 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     }
   };
 
+  // Load older messages (for pagination)
+  const loadMoreMessages = async (): Promise<boolean> => {
+    if (!currentRoom || !rpcClient || !isInitialized || isLoadingMore || !hasMoreMessages) {
+      return false;
+    }
+
+    try {
+      setIsLoadingMore(true);
+
+      // Create request with oldest message timestamp as a reference point
+      const request = rpcClient.request('loadMoreMessages');
+      await request.send(JSON.stringify({
+        roomId: currentRoom.id,
+        before: oldestMessageTimestamp,
+        limit: 20 // Number of messages to load
+      }));
+
+      // The response will be handled in the WorkletContext callback
+      setIsLoadingMore(false);
+      return true;
+    } catch (error) {
+      console.error('Error loading more messages:', error);
+      setIsLoadingMore(false);
+      return false;
+    }
+  };
+
   return (
     <ChatContext.Provider
       value={{
@@ -201,7 +257,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         leaveRoom,
         sendMessage,
         refreshRooms,
-        createRoom
+        createRoom,
+        loadMoreMessages
       }}
     >
       {children}

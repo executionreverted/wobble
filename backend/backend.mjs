@@ -11,7 +11,7 @@ import Hyperblobs from 'hyperblobs'
 const { IPC } = BareKit
 import UserBase from './userbase/userbase.mjs'
 import RoomBase from './roombase/roombase.mjs'
-
+import { generateUUID } from './utils.mjs'
 const path =
   Bare.argv[0] === 'android'
     ? '/data/data/to.holepunch.bare.expo/autopass-example'
@@ -37,25 +37,6 @@ if (!fs.existsSync(roomBasePath)) {
   fs.mkdirSync(roomBasePath, { recursive: true })
 }
 
-// Utility function to generate a UUID since crypto.randomUUID might not be available
-function generateUUID() {
-  // Create random bytes
-  const randomBytes = crypto.randomBytes(16);
-
-  // Set version bits (Version 4 = random UUID)
-  randomBytes[6] = (randomBytes[6] & 0x0f) | 0x40; // Version 4
-  randomBytes[8] = (randomBytes[8] & 0x3f) | 0x80; // Variant
-
-  // Convert to hex string with dashes
-  const hexString = b4a.toString(randomBytes, 'hex');
-  return [
-    hexString.substring(0, 8),
-    hexString.substring(8, 12),
-    hexString.substring(12, 16),
-    hexString.substring(16, 20),
-    hexString.substring(20, 32)
-  ].join('-');
-}
 
 const genSeed = () => {
   const words = []
@@ -166,6 +147,31 @@ const rpc = new RPC(IPC, (req, error) => {
     const parsedData = JSON.parse(data)
     sendMessage(parsedData)
   }
+
+
+  if (req.command === 'loadMoreMessages') {
+    const data = b4a.toString(req.data);
+    const parsedData = JSON.parse(data);
+    loadMoreMessages(parsedData);
+  }
+
+  if (req.command === 'olderMessages') {
+    try {
+      const data = b4a.toString(req.data);
+      const parsedData = JSON.parse(data);
+      console.log('Older messages received:', parsedData);
+
+      if (updateMessages && Array.isArray(parsedData.messages)) {
+        // These are older messages, so we want to append them
+        updateMessages(parsedData.messages, false);
+      }
+    } catch (e) {
+      console.error('Error handling olderMessages:', e);
+    }
+  }
+
+
+
 })
 
 const updateUserProfile = async (profileData) => {
@@ -427,21 +433,75 @@ const createRoom = async (roomData) => {
     req.send(JSON.stringify(response));
   }
 };
-// Initialize an existing room
-const initializeRoom = async (roomId) => {
-  try {
-    const roomDir = `${roomBasePath}/${roomId}`;
 
-    // If the room directory doesn't exist, return
-    if (!fs.existsSync(roomDir)) {
-      console.log(`Room directory does not exist for room: ${roomId}`);
-      return null;
+const initializeUserRooms = async () => {
+  if (!userBase) return;
+
+  try {
+    await userBase.ready();
+    const userData = await userBase.getUserData();
+
+    if (!userData.rooms || !Array.isArray(userData.rooms) || userData.rooms.length === 0) {
+      console.log('No rooms to initialize');
+      return;
     }
+
+    console.log(`Initializing ${userData.rooms.length} rooms for user`);
+
+    const initializedRooms = [];
+
+    for (const roomData of userData.rooms) {
+      try {
+        // Skip if already initialized
+        if (roomBases[roomData.id]) {
+          initializedRooms.push(roomData.id);
+          continue;
+        }
+
+        // Initialize the room
+        const room = await initializeRoom(roomData);
+
+        if (room) {
+          initializedRooms.push(roomData.id);
+
+          // Update message count if possible
+          try {
+            await room.getMessageCount();
+          } catch (countErr) {
+            console.error(`Error getting message count for room ${roomData.id}:`, countErr);
+          }
+        }
+      } catch (roomErr) {
+        console.error(`Error initializing room ${roomData.id}:`, roomErr);
+      }
+    }
+
+    console.log(`Initialized ${initializedRooms.length} rooms: ${initializedRooms.join(', ')}`);
+  } catch (error) {
+    console.error('Error initializing user rooms:', error);
+  }
+};
+
+// Initialize an existing room
+const initializeRoom = async (roomData) => {
+  try {
+    // Extract roomId from the room data
+    const roomId = roomData.id;
 
     // If the room is already initialized, return it
     if (roomBases[roomId]) {
       return roomBases[roomId];
     }
+
+    const roomDir = `${roomBasePath}/${roomId}`;
+
+    // If the room directory doesn't exist, create it
+    if (!fs.existsSync(roomDir)) {
+      console.log(`Room directory does not exist, creating: ${roomDir}`);
+      fs.mkdirSync(roomDir, { recursive: true });
+    }
+
+    console.log(`Initializing room: ${roomId} (${roomData.name})`);
 
     // Create corestore for the room
     const roomCorestore = new Corestore(roomDir);
@@ -454,77 +514,148 @@ const initializeRoom = async (roomId) => {
     const blobStore = new Hyperblobs(blobCore);
     await blobStore.ready();
 
-    // Create the room instance
-    const room = new RoomBase(roomCorestore, {
+    // Create the room instance - use stored key and encryption key
+    const roomOptions = {
       blobCore,
-      blobStore
-    });
+      blobStore,
+      roomId: roomData.id,
+      roomName: roomData.name
+    };
 
+    // If we have the encryption key and room key, use them
+    if (roomData.key && roomData.encryptionKey) {
+      roomOptions.key = Buffer.from(roomData.key, 'hex');
+      roomOptions.encryptionKey = Buffer.from(roomData.encryptionKey, 'hex');
+    }
+
+    // Create the room instance
+    const room = new RoomBase(roomCorestore, roomOptions);
     await room.ready();
+
+    // Set up message listener if not already set
+    if (!room._hasMessageListener) {
+      room.on('new-message', (msg) => {
+        // Format the message
+        const formattedMessage = {
+          id: msg.id,
+          roomId: roomId,
+          content: msg.content,
+          sender: msg.sender,
+          timestamp: msg.timestamp,
+          system: msg.system || false
+        };
+
+        // Send to client
+        const req = rpc.request('newMessage');
+        req.send(JSON.stringify({
+          success: true,
+          message: formattedMessage
+        }));
+      });
+
+      room._hasMessageListener = true;
+    }
 
     // Store the instances
     roomCorestores[roomId] = roomCorestore;
     roomBases[roomId] = room;
 
+    console.log(`Room ${roomId} initialized successfully`);
     return room;
   } catch (error) {
-    console.error(`Error initializing room ${roomId}:`, error);
+    console.error(`Error initializing room ${roomData.id} (${roomData.name}):`, error);
     return null;
   }
 };
 
-// Join a room and get messages
-const joinRoom = async (roomId) => {
+const getMessagesFromRoom = async (room, roomId, options = {}) => {
+  const { limit = 50, reverse = true, before = null, after = null } = options;
+
   try {
-    // Initialize the room if needed
-    let room = roomBases[roomId];
-    if (!room) {
-      room = await initializeRoom(roomId);
-      if (!room) {
-        throw new Error(`Failed to initialize room: ${roomId}`);
-      }
-    }
-
-    await room.ready();
-
-    // Get room messages
-    const messageStream = room.getMessages({ limit: 50, reverse: true });
-    const messages = [];
-
-    for await (const msg of messageStream) {
-      messages.push({
-        id: msg.id,
-        roomId: roomId,
-        content: msg.content,
-        sender: msg.sender,
-        timestamp: msg.timestamp,
-        system: msg.system || false
-      });
-    }
-
-    // Send response
-    const response = {
-      success: true,
-      roomId: roomId,
-      messages: messages
+    // Build query options
+    const queryOptions = {
+      limit,
+      reverse
     };
 
-    const req = rpc.request('roomMessages');
-    req.send(JSON.stringify(response));
+    // Add timestamp filters if provided
+    if (before !== null) {
+      queryOptions.lt = { timestamp: before };
+    }
+
+    if (after !== null) {
+      queryOptions.gt = { timestamp: after };
+    }
+
+    // Get messages - handle different return types
+    const messageStream = room.getMessages(queryOptions);
+    let messages = [];
+
+    // Handle different return types (promise vs stream)
+    if (messageStream.then) {
+      // It's a promise that resolves to an array
+      messages = await messageStream;
+    } else if (messageStream.on) {
+      // It's a Node.js stream
+      messages = await new Promise((resolve, reject) => {
+        const results = [];
+        messageStream.on('data', msg => results.push(msg));
+        messageStream.on('end', () => resolve(results));
+        messageStream.on('error', err => {
+          console.error('Error in message stream:', err);
+          resolve(results); // Resolve with partial results on error
+        });
+      });
+    } else if (Array.isArray(messageStream)) {
+      // It's already an array
+      messages = messageStream;
+    }
+
+    // Format messages with roomId
+    return messages.map(msg => ({
+      id: msg.id,
+      roomId: roomId,
+      content: msg.content,
+      sender: msg.sender,
+      timestamp: msg.timestamp,
+      system: msg.system || false
+    }));
 
   } catch (error) {
-    console.error('Error joining room:', error);
-    const response = {
-      success: false,
-      error: error.message || 'Unknown error joining room',
-      roomId: roomId,
-      messages: []
-    };
-
-    const req = rpc.request('roomMessages');
-    req.send(JSON.stringify(response));
+    console.error('Error getting messages from room:', error);
+    return [];
   }
 };
+
+
+
+
+
+
+
+
+
+// Join a room and get messages
+const joinRoom = async (store, inviteCode, opts = {}) => {
+  if (!store) throw new Error('Corestore is required');
+  if (!inviteCode) throw new Error('Invite code is required');
+
+  try {
+    // Create pairing instance
+    const pair = RoomBase.pair(store, inviteCode, opts);
+
+    // Wait for pairing to complete
+    const room = await pair.finished();
+
+    // Wait for room to be fully ready
+    await room.ready();
+
+    return room;
+  } catch (err) {
+    console.error('Error joining room:', err);
+    throw err;
+  }
+}
 
 // Leave a room (cleanup)
 const leaveRoom = async (roomId) => {
@@ -556,19 +687,22 @@ const sendMessage = async (messageData) => {
 
     await room.ready();
 
+    // Create a unique message ID if not provided
+    const messageId = messageData.id || `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
     // Format the message
     const message = {
+      id: messageId,
       content: messageData.content,
       sender: messageData.sender,
       timestamp: messageData.timestamp || Date.now(),
       system: messageData.system || false
     };
 
-    // Send the message
-    const messageId = await room.sendMessage(message);
+    // Send the message - this will trigger the 'new-message' event we're listening for
+    await room.sendMessage(message);
 
-    // Add id to the message and send response
-    message.id = messageId;
+    // Add roomId to the message
     message.roomId = roomId;
 
     const response = {
@@ -590,6 +724,56 @@ const sendMessage = async (messageData) => {
     req.send(JSON.stringify(response));
   }
 };
+
+
+const loadMoreMessages = async (params) => {
+  const { roomId, before, limit = 20 } = params;
+
+  try {
+    // Initialize the room if needed
+    let room = roomBases[roomId];
+    if (!room) {
+      room = await initializeRoom(roomId);
+      if (!room) {
+        throw new Error(`Failed to initialize room: ${roomId}`);
+      }
+    }
+
+    await room.ready();
+
+    // Get older messages
+    const messages = await getMessagesFromRoom(room, {
+      limit,
+      reverse: true,
+      before
+    });
+
+    // Send response
+    const response = {
+      success: true,
+      roomId,
+      messages,
+      isOlderMessages: true // Flag to indicate these are older messages
+    };
+
+    const req = rpc.request('olderMessages');
+    req.send(JSON.stringify(response));
+
+  } catch (error) {
+    console.error('Error loading more messages:', error);
+    const response = {
+      success: false,
+      error: error.message || 'Unknown error loading more messages',
+      roomId,
+      messages: []
+    };
+
+    const req = rpc.request('olderMessages');
+    req.send(JSON.stringify(response));
+  }
+};
+
+
 
 // Get all rooms the user is part of
 const getRooms = async () => {
@@ -728,6 +912,7 @@ const reinitializeBackend = async () => {
       }));
     }
   } else {
+    console.log('No user')
     // Just notify that backend is ready
     const req = rpc.request('backendInitialized');
     req.send(JSON.stringify({ success: true }));
@@ -744,22 +929,6 @@ const teardown = async () => {
 }
 
 
-
-// Initialize UserBase at startup if account exists
-(async () => {
-  if (hasAccount()) {
-    try {
-      await initializeUserBase();
-      console.log("UserBase initialized on startup");
-    } catch (err) {
-      console.error("Failed to initialize UserBase on startup:", err);
-    }
-  }
-})();
-
 if (!isBackendInitialized) {
-  isBackendInitialized = true;
-  // Send initialization complete signal
-  const initReq = rpc.request('backendInitialized');
-  initReq.send(JSON.stringify({ success: true }));
+  await reinitializeBackend();
 }

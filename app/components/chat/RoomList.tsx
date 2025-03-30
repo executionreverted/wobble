@@ -8,12 +8,16 @@ import { Room } from '../../types';
 import { COLORS } from '../../utils/constants';
 import { filterRooms } from '../../utils/helpers';
 import CreateRoomModal from './CreateRoomModal';
+import JoinRoomModal from './JoinRoomModal';
+import useWorklet from '../../hooks/useWorklet';
 
 const RoomListScreen = () => {
   const { rooms, selectRoom, refreshRooms, createRoom } = useChat();
+  const { rpcClient, setCallbacks } = useWorklet();
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredRooms, setFilteredRooms] = useState<Room[]>(rooms);
   const [createModalVisible, setCreateModalVisible] = useState(false);
+  const [joinModalVisible, setJoinModalVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
@@ -22,6 +26,11 @@ const RoomListScreen = () => {
     // Load rooms when component mounts
     setIsLoading(true);
     refreshRooms().finally(() => setIsLoading(false));
+
+    // Set up callback for room join results
+    setCallbacks({
+      onRoomJoined: handleRoomJoined
+    });
   }, []);
 
   // Filter rooms when search query or rooms list changes
@@ -37,6 +46,15 @@ const RoomListScreen = () => {
 
   const handleCreateRoom = () => {
     setCreateModalVisible(true);
+  };
+
+  const handleJoinRoom = () => {
+    setJoinModalVisible(true);
+  };
+
+  const handleRoomJoined = (room: Room) => {
+    refreshRooms();
+    Alert.alert('Success', `You've joined the room: ${room.name}`);
   };
 
   const handleRoomCreated = async (roomName: string, roomDescription: string) => {
@@ -76,9 +94,14 @@ const RoomListScreen = () => {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
         <Text style={styles.title}>Rooms</Text>
-        <TouchableOpacity style={styles.createButton} onPress={handleCreateRoom}>
-          <MaterialIcons name="add" size={24} color={COLORS.textPrimary} />
-        </TouchableOpacity>
+        <View style={styles.headerButtons}>
+          <TouchableOpacity style={styles.joinButton} onPress={handleJoinRoom}>
+            <MaterialIcons name="group-add" size={24} color={COLORS.textPrimary} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.createButton} onPress={handleCreateRoom}>
+            <MaterialIcons name="add" size={24} color={COLORS.textPrimary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.searchContainer}>
@@ -109,13 +132,22 @@ const RoomListScreen = () => {
         <View style={styles.emptyState}>
           <MaterialIcons name="forum" size={64} color={COLORS.textMuted} />
           <Text style={styles.emptyStateText}>No rooms found</Text>
-          <TouchableOpacity
-            style={styles.createEmptyButton}
-            onPress={handleCreateRoom}
-          >
-            <MaterialIcons name="add" size={20} color={COLORS.textPrimary} />
-            <Text style={styles.createEmptyButtonText}>Create a Room</Text>
-          </TouchableOpacity>
+          <View style={styles.emptyStateButtons}>
+            <TouchableOpacity
+              style={styles.emptyStateButton}
+              onPress={handleCreateRoom}
+            >
+              <MaterialIcons name="add" size={20} color={COLORS.textPrimary} />
+              <Text style={styles.emptyStateButtonText}>Create a Room</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.emptyStateButton, styles.joinEmptyButton]}
+              onPress={handleJoinRoom}
+            >
+              <MaterialIcons name="group-add" size={20} color={COLORS.textPrimary} />
+              <Text style={styles.emptyStateButtonText}>Join a Room</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -123,6 +155,12 @@ const RoomListScreen = () => {
         visible={createModalVisible}
         onClose={() => setCreateModalVisible(false)}
         onRoomCreated={handleRoomCreated}
+      />
+
+      <JoinRoomModal
+        visible={joinModalVisible}
+        onClose={() => setJoinModalVisible(false)}
+        onRoomJoined={handleRoomJoined}
       />
     </View>
   );
@@ -147,11 +185,23 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: COLORS.textPrimary,
   },
+  headerButtons: {
+    flexDirection: 'row',
+  },
   createButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
     backgroundColor: COLORS.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 10,
+  },
+  joinButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.primaryDark,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -230,15 +280,24 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     marginBottom: 20,
   },
-  createEmptyButton: {
+  emptyStateButtons: {
+    flexDirection: 'column',
+    width: '80%',
+  },
+  emptyStateButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: COLORS.primary,
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderRadius: 8,
+    marginBottom: 12,
   },
-  createEmptyButtonText: {
+  joinEmptyButton: {
+    backgroundColor: COLORS.primaryDark,
+  },
+  emptyStateButtonText: {
     color: COLORS.textPrimary,
     fontWeight: 'bold',
     marginLeft: 8,

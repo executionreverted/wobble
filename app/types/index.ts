@@ -10,16 +10,21 @@ export type Room = {
   description: string;
   createdAt?: number;
   messageCount?: number;
+  invite?: string; // For sharing room invites
 };
 
 export type Message = {
   id: string;
   roomId: string;
-  userId: string;
-  username: string;
-  text: string;
+  userId?: string;
+  username?: string;
+  sender: string;
+  content: string;
   timestamp: number;
   isSystem?: boolean;
+  system?: boolean;
+  hasAttachments?: boolean;
+  attachments?: string | string[];
 };
 
 export type AuthContextType = {
@@ -40,8 +45,14 @@ export type ChatContextType = {
   sendMessage: (text: string) => Promise<void>;
   refreshRooms: () => Promise<void>;
   createRoom: (name: string, description: string) => Promise<{ success: boolean, roomId: string }>;
+  loadMoreMessages: () => Promise<boolean>; // New function to load more messages
 };
 
 export type SeedPhraseResponse = string[];
+
+export type MessageBatch = {
+  messages: Message[];
+  hasMore: boolean;
+};
 
 export default {}

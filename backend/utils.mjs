@@ -24,3 +24,24 @@ export const sanitizeTextForTerminal = (text) => {
     // Replace unicode "replacement character" that appears for invalid sequences
     .replace(/\uFFFD/g, '�');
 };
+
+
+// Utility function to generate a UUID since crypto.randomUUID might not be available
+export function generateUUID() {
+  // Create random bytes
+  const randomBytes = crypto.randomBytes(16);
+
+  // Set version bits (Version 4 = random UUID)
+  randomBytes[6] = (randomBytes[6] & 0x0f) | 0x40; // Version 4
+  randomBytes[8] = (randomBytes[8] & 0x3f) | 0x80; // Variant
+
+  // Convert to hex string with dashes
+  const hexString = b4a.toString(randomBytes, 'hex');
+  return [
+    hexString.substring(0, 8),
+    hexString.substring(8, 12),
+    hexString.substring(12, 16),
+    hexString.substring(16, 20),
+    hexString.substring(20, 32)
+  ].join('-');
+}
