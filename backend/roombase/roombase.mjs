@@ -14,8 +14,8 @@ import fs from 'bare-fs';
 import path from 'bare-path';
 import { generateUUID, sanitizeTextForTerminal } from '../utils.mjs';
 import Hypercore from 'hypercore';
-
-
+let roomCorestores = {}
+let roomBases = {}
 class RoomBasePairer extends ReadyResource {
   constructor(store, invite, opts = {}) {
     super();
@@ -917,7 +917,9 @@ class RoomBase extends ReadyResource {
             content: msg.content,
             sender: msg.sender,
             timestamp: msg.timestamp,
-            system: msg.system || false
+            system: msg.system || false,
+            attachments: msg.attachments || "[]",
+            hasAttachments: msg.hasAttachments
           };
 
           // Send to client

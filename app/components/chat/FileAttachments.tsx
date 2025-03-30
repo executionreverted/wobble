@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useCallback, useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform, Image } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { COLORS } from '../../utils/constants';
@@ -8,6 +8,76 @@ import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
 import { createStableBlobId } from '@/app/utils/helpers';
 
+
+const useAutoDownloadPreview = (
+  attachment,
+  roomId,
+  downloadFile,
+  fileDownloads,
+  isDownloading,
+  setIsDownloading
+) => {
+  const attemptCount = useRef(0);
+  const maxAttempts = 3;
+
+  // Create stable identifiers
+  const blobId = createStableBlobId(attachment.blobId);
+  const attachmentKey = `${roomId}_${blobId}`;
+
+  // Get current download status
+  const downloadStatus = fileDownloads[attachmentKey];
+  const hasPreview = Boolean(downloadStatus?.data);
+
+  // Function to trigger download
+  const attemptDownload = useCallback(async () => {
+    if (isDownloading || hasPreview || attemptCount.current >= maxAttempts) return;
+
+    attemptCount.current += 1;
+    console.log(`Attempting preview download for ${attachment.name} (attempt ${attemptCount.current}/${maxAttempts})`);
+
+    setIsDownloading(true);
+    await downloadFile(roomId, attachment, true, attachmentKey);
+  }, [attachment, roomId, downloadFile, attachmentKey, isDownloading, hasPreview]);
+
+  // Start download on mount with a small delay
+  useEffect(() => {
+    if (!hasPreview && !isDownloading && isImageFile(attachment.name)) {
+      const timer = setTimeout(() => {
+        attemptDownload();
+      }, 300);
+
+      return () => clearTimeout(timer);
+    }
+  }, []);
+
+  // If download completes or fails, check status and retry if needed
+  useEffect(() => {
+    if (downloadStatus) {
+      // If complete, reset attempting flag
+      if (downloadStatus.progress === 100 && downloadStatus.data) {
+        console.log(`Preview download complete for ${attachment.name}`);
+        attemptCount.current = maxAttempts; // Stop retrying
+      }
+      // If failed or stalled, retry after delay
+      else if (downloadStatus.error ||
+        (downloadStatus.progress === 0 && !isDownloading && attemptCount.current < maxAttempts)) {
+        const timer = setTimeout(() => {
+          attemptDownload();
+        }, 1000);
+
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [downloadStatus, isDownloading]);
+
+  return { hasPreview, downloadStatus, attachmentKey };
+};
+
+
+
+
+
+
 // File attachment component with download progress
 export const EnhancedFileAttachment = ({ handleAttachmentPress, attachment, roomId }: { attachment: any; roomId: string }) => {
   const { fileDownloads, downloadFile } = useWorklet();
@@ -16,9 +86,6 @@ export const EnhancedFileAttachment = ({ handleAttachmentPress, attachment, room
   // Create a unique key for this attachment
   const blobId = createStableBlobId(attachment.blobId);
   const attachmentKey = `${roomId}_${blobId}`;
-
-
-
 
   // Get download status for this attachment using the unique key
   const downloadStatus = fileDownloads[attachmentKey];
@@ -136,25 +203,33 @@ export const EnhancedFileAttachment = ({ handleAttachmentPress, attachment, room
 export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roomId }: { attachment: any; roomId: string }) => {
   const { fileDownloads, downloadFile } = useWorklet();
   const [isDownloading, setIsDownloading] = useState(false);
-  const [localPreviewUri, setLocalPreviewUri] = useState<string | null>(null);
+  const [localPreviewUri, setLocalPreviewUri] = useState(null);
 
-  //
-  const blobId = createStableBlobId(attachment.blobId);
-  const attachmentKey = `${roomId}_${blobId}`;
+  // Use the auto-download hook
+  const { hasPreview, downloadStatus, attachmentKey } = useAutoDownloadPreview(
+    attachment,
+    roomId,
+    downloadFile,
+    fileDownloads,
+    isDownloading,
+    setIsDownloading
+  );  // Create a unique key for this attachment
+  const hasFullData = Boolean(downloadStatus?.data && !downloadStatus?.preview);
 
-  // Get download status for this attachment using the unique key
-  const downloadStatus = fileDownloads[attachmentKey];
-  const hasPreview = Boolean(downloadStatus?.data && downloadStatus?.preview);
-  // When download status changes, update the local preview URI to force re-render
+  // Update local URI when download status changes
   useEffect(() => {
     if (downloadStatus?.data) {
-      const timestamp = downloadStatus.timestamp || Date.now();
-      setLocalPreviewUri(`data:image/jpeg;base64,${downloadStatus.data}?t=${timestamp}`);
+      // Create a proper data URI with the correct mime type
+      const mimeType = downloadStatus.mimeType || getMimeTypeFromFilename(attachment.name) || 'image/jpeg';
+      const dataUri = `data:${mimeType};base64,${downloadStatus.data}`;
+      console.log(`Setting image preview URI for ${attachmentKey} with mime type ${mimeType}`);
+      setLocalPreviewUri(dataUri as any);
     } else {
       setLocalPreviewUri(null);
     }
-  }, [downloadStatus?.preview]);
+  }, [downloadStatus?.data, downloadStatus?.timestamp, attachmentKey, attachment.name]);
 
+  // Update download state and auto-download previews
   useEffect(() => {
     // Update downloading state based on progress
     if (downloadStatus) {
@@ -163,19 +238,19 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
       setIsDownloading(false);
     }
 
-    // Auto-download preview if attachment is an image and we don't have a preview yet
+    // Auto-download preview if it's an image and we don't have a preview yet
     if (!downloadStatus && !isDownloading && !hasPreview && isImageFile(attachment.name)) {
+      console.log(`Auto-downloading preview for ${attachment.name}`);
       downloadPreview();
     }
-  }, [downloadStatus, attachment]);
+  }, [downloadStatus, attachment, hasPreview, isDownloading]);
 
   const downloadPreview = async () => {
     if (!roomId || !attachment || !attachment.blobId) return;
 
     console.log(`Downloading preview for ${attachment.name} with key ${attachmentKey}`);
     setIsDownloading(true);
-    // Pass the attachmentKey as the 4th parameter to downloadFile
-    await downloadFile(roomId, attachment, true, attachmentKey); // true indicates preview mode
+    await downloadFile(roomId, attachment, true, attachmentKey);
   };
 
   const handleFullDownload = async () => {
@@ -184,7 +259,7 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
       return;
     }
 
-    if (hasPreview) {
+    if (hasPreview || hasFullData) {
       Alert.alert(
         'Download Full Image',
         `Do you want to download the full-quality version of "${attachment.name}"?`,
@@ -194,7 +269,7 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
             text: 'Download',
             onPress: async () => {
               setIsDownloading(true);
-              await downloadFile(roomId, attachment, false, attachmentKey); // false for full quality
+              await downloadFile(roomId, attachment, false, attachmentKey);
             }
           }
         ]
@@ -209,7 +284,7 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
     if (!downloadStatus?.data) return;
 
     if (Platform.OS === 'web') {
-      // For web, trigger a download
+      // Web download implementation
       try {
         const blob = b64toBlob(downloadStatus.data, downloadStatus.mimeType || 'image/jpeg');
         const url = URL.createObjectURL(blob as any);
@@ -252,47 +327,10 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
     }
   };
 
-  // Helper for converting base64 to blob (keep your existing implementation)
-  const atob = (data: string): string => {
-    // Your existing implementation
-    if (Platform.OS === 'web') {
-      return window.atob(data);
-    } else {
-      return data;
-    }
-  };
-
-  const b64toBlob = (base64: string, mimeType = '') => {
-    // Your existing implementation
-    if (Platform.OS !== 'web') return null;
-
-    try {
-      const byteCharacters = atob(base64);
-      const byteArrays = [];
-
-      for (let offset = 0; offset < byteCharacters.length; offset += 512) {
-        const slice = byteCharacters.slice(offset, offset + 512);
-
-        const byteNumbers = new Array(slice.length);
-        for (let i = 0; i < slice.length; i++) {
-          byteNumbers[i] = slice.charCodeAt(i);
-        }
-
-        const byteArray = new Uint8Array(byteNumbers);
-        byteArrays.push(byteArray);
-      }
-
-      return new Blob(byteArrays, { type: mimeType });
-    } catch (error) {
-      console.error('Error converting base64 to blob:', error);
-      return null;
-    }
-  };
-
   return (
     <TouchableOpacity
       style={styles.imageAttachmentContainer}
-      onPress={hasPreview ? handleSaveToGallery : handleFullDownload}
+      onPress={hasPreview || hasFullData ? handleSaveToGallery : handleFullDownload}
       disabled={isDownloading}
     >
       <View style={styles.imageAttachmentPlaceholder}>
@@ -301,7 +339,7 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
             source={{ uri: localPreviewUri }}
             style={styles.imagePreview}
             resizeMode="contain"
-            // Add a key to force re-render when the image changes
+            // Add a key with timestamp to force re-render when image changes
             key={`preview-${attachmentKey}-${downloadStatus?.timestamp || Date.now()}`}
           />
         ) : (
@@ -322,7 +360,7 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
           </View>
         )}
 
-        {hasPreview && (
+        {(hasPreview || hasFullData) && (
           <View style={styles.imageActionContainer}>
             <TouchableOpacity
               style={styles.imageAction}
@@ -337,6 +375,20 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
   );
 };
 
+// Helper function to get MIME type from filename
+const getMimeTypeFromFilename = (filename: string) => {
+  const ext = filename?.split('.')?.pop()?.toLowerCase();
+  const mimeTypes = {
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'png': 'image/png',
+    'gif': 'image/gif',
+    'webp': 'image/webp',
+    'bmp': 'image/bmp',
+    'svg': 'image/svg+xml'
+  };
+  return ext ? mimeTypes[ext] as any : null;
+};
 // Helper function to check if file is an image
 const isImageFile = (fileName: string) => {
   const ext = fileName?.split('.')?.pop()?.toLowerCase() || '';

@@ -347,8 +347,56 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
                     system: Boolean(message.system), // Ensure boolean
                   };
 
-                  console.log('Formatted message for UI:', formattedMessage);
+                  console.log('Formatted message for UI:', formattedMessage, message);
                   updateMessages([formattedMessage], false);
+
+                  // Auto-download previews for image attachments in new messages
+                  if (message.hasAttachments && message.attachments) {
+                    try {
+                      let attachmentsArray = [];
+
+                      // Parse attachments if needed
+                      if (typeof message.attachments === 'string') {
+                        attachmentsArray = JSON.parse(message.attachments);
+                      } else if (Array.isArray(message.attachments)) {
+                        attachmentsArray = message.attachments;
+                      }
+                      if (!Array.isArray(attachmentsArray)) {
+                        attachmentsArray = JSON.parse(attachmentsArray)
+                      }
+                      // Process each attachment
+                      if (Array.isArray(attachmentsArray)) {
+                        for (const attachment of attachmentsArray) {
+                          // Check if it's an image
+                          if (attachment && attachment.name) {
+                            const fileExt = attachment.name.split('.').pop().toLowerCase();
+                            const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(fileExt);
+
+                            if (isImage && attachment.blobId) {
+                              console.log(`Auto-downloading preview for new image: ${attachment.name}`);
+                              // Use a small timeout to avoid overwhelming the backend with requests
+                              setTimeout(() => {
+                                const blobId = createStableBlobId(attachment.blobId);
+                                const attachmentKey = `${message.roomId}_${blobId}`;
+
+                                // Download the preview
+                                const downloadRequest = client.request('downloadFile');
+                                downloadRequest.send(JSON.stringify({
+                                  roomId: message.roomId,
+                                  attachment,
+                                  requestProgress: true,
+                                  preview: true,
+                                  attachmentKey
+                                }));
+                              }, 500); // Short delay to let the message appear first
+                            }
+                          }
+                        }
+                      }
+                    } catch (parseError) {
+                      console.error('Error processing attachments for auto-preview:', parseError);
+                    }
+                  }
                 }
               } catch (e) {
                 console.error('Error handling newMessage:', e);
