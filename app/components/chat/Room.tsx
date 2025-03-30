@@ -94,6 +94,13 @@ const EnhancedChatRoom = () => {
     setInputHeight(newHeight);
   };
 
+  const [showAttachmentOptions, setShowAttachmentOptions] = useState(false);
+
+  // Toggle attachment options
+  const toggleAttachmentOptions = () => {
+    setShowAttachmentOptions(prev => !prev);
+  };
+
   // Add keyboard listeners to track keyboard visibility
   useEffect(() => {
     const keyboardWillShowListener = Keyboard.addListener(
@@ -220,7 +227,41 @@ const EnhancedChatRoom = () => {
           ListEmptyComponent={EmptyMessagesList}
         />
 
+        {showAttachmentOptions && (
+          <>
+            <TouchableOpacity
+              style={styles.overlay}
+              activeOpacity={0}
+              onPress={toggleAttachmentOptions}
+            />
+            <View style={styles.attachmentOptions}>
+              <TouchableOpacity style={styles.attachmentOption}>
+                <View style={[styles.attachmentIconWrapper, { backgroundColor: '#4caf50' }]}>
+                  <MaterialIcons name="photo" size={24} color="#fff" />
+                </View>
+                <Text style={styles.attachmentText}>Photo</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.attachmentOption}>
+                <View style={[styles.attachmentIconWrapper, { backgroundColor: '#2196f3' }]}>
+                  <MaterialIcons name="videocam" size={24} color="#fff" />
+                </View>
+                <Text style={styles.attachmentText}>Video</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.attachmentOption}>
+                <View style={[styles.attachmentIconWrapper, { backgroundColor: '#ff9800' }]}>
+                  <MaterialIcons name="insert-drive-file" size={24} color="#fff" />
+                </View>
+                <Text style={styles.attachmentText}>File</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
+
         <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+          <TouchableOpacity style={styles.attachmentButton} onPress={toggleAttachmentOptions}>
+            <MaterialIcons name="attach-file" size={24} color={COLORS.textSecondary} />
+          </TouchableOpacity>
           <TextInput
             style={[styles.input, { height: inputHeight }]}
             value={messageText}
@@ -400,6 +441,10 @@ const styles = StyleSheet.create({
   disabledButton: {
     backgroundColor: COLORS.tertiaryBackground,
   },
+  attachmentButton: {
+    padding: 8,
+    marginRight: 8,
+  },
   loadingMoreContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -410,6 +455,44 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.textSecondary,
     marginLeft: 8,
+  },
+  attachmentOptions: {
+    position: 'absolute',
+    bottom: 70, // Position above input
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    padding: 16,
+    backgroundColor: COLORS.secondaryBackground,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.separator,
+    justifyContent: 'space-around',
+    zIndex: 2,
+  },
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    zIndex: 1,
+  },
+  attachmentOption: {
+    alignItems: 'center',
+    width: 80,
+  },
+  attachmentIconWrapper: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  attachmentText: {
+    fontSize: 12,
+    color: COLORS.textSecondary,
   },
 });
 
