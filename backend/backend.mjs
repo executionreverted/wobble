@@ -124,6 +124,12 @@ const rpc = new RPC(IPC, (req, error) => {
     reinitializeBackend();
   }
 
+  if (req.command === 'generateRoomInvite') {
+    const data = b4a.toString(req.data);
+    const parsedData = JSON.parse(data);
+    generateRoomInvite(parsedData.roomId);
+  }
+
   if (req.command === 'generateSeed') {
     sendSeed()
   }
@@ -1469,6 +1475,49 @@ const joinRoomByInvite = async (params) => {
 
     const req = rpc.request('roomJoinResult');
     req.send(JSON.stringify(response));
+  }
+};
+
+const generateRoomInvite = async (roomId) => {
+  try {
+    console.log(`Generating invite for room: ${roomId}`);
+
+    // Make sure the room exists
+    const room = roomBases[roomId];
+    if (!room) {
+      throw new Error(`Room ${roomId} not initialized`);
+    }
+
+    await room.ready();
+
+    // Generate the invite code
+    const inviteCode = await room.createInvite();
+    console.log(`Generated invite code for room ${roomId}: ${inviteCode}`);
+
+    // Send the invite code back to the client
+    const response = {
+      success: true,
+      roomId: roomId,
+      inviteCode: inviteCode
+    };
+
+    const req = rpc.request('roomInviteGenerated');
+    req.send(JSON.stringify(response));
+
+    return response;
+  } catch (error) {
+    console.error('Error generating room invite:', error);
+
+    const response = {
+      success: false,
+      roomId: roomId,
+      error: error.message || 'Failed to generate invite'
+    };
+
+    const req = rpc.request('roomInviteGenerated');
+    req.send(JSON.stringify(response));
+
+    return response;
   }
 };
 

@@ -13,6 +13,7 @@ let updateRooms: ((rooms: Room[]) => void) | undefined = undefined;
 let updateMessages: ((messages: Message[], replace: boolean) => void) | undefined = undefined;
 let onRoomCreated: ((room: Room) => void) | undefined = undefined;
 let onRoomJoined: ((room: Room) => void) | undefined = undefined;
+let onInviteGenerated: ((roomId: string, inviteCode: string) => void) | undefined = undefined;
 
 export interface WorkletContextType {
   worklet: Worklet | null;
@@ -34,6 +35,10 @@ export interface WorkletContextType {
     onRoomJoined?: (room: Room) => void
   }) => void;
   reinitializeBackend: () => Promise<boolean>;
+  onInviteGenerated?: (roomId: string, inviteCode: string) => void;
+  setInviteCallbacks: (callbacks: {
+    onInviteGenerated?: (roomId: string, inviteCode: string) => void
+  }) => void;
 }
 
 export const WorkletContext = createContext<WorkletContextType>(undefined as any);
@@ -384,6 +389,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       };
     }
   }, [rpcClient]);
+
+
   const checkExistingUser = useCallback(async (): Promise<{ exists: boolean, user?: any, error?: string }> => {
     if (!rpcClient) {
       console.error('RPC client not initialized');
@@ -412,11 +419,12 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     updateRooms?: (rooms: Room[]) => void,
     updateMessages?: (messages: Message[], replace: boolean) => void,
     onRoomCreated?: (room: Room) => void,
-    onRoomJoined?: (room: Room) => void
+    onRoomJoined?: (room: Room) => void,
+    onInviteGenerated?: (roomId: string, inviteCode: string) => void // Add this
   }) => {
     console.log('Setting callbacks in WorkletContext:', callbacks);
 
-    // Store references directly
+    // Store existing references
     if (callbacks.updateRooms) {
       updateRooms = callbacks.updateRooms;
       console.log('updateRooms callback set successfully');
@@ -436,7 +444,26 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       onRoomJoined = callbacks.onRoomJoined;
       console.log('onRoomJoined callback set successfully');
     }
+
+    // Store the new invite callback reference
+    if (callbacks.onInviteGenerated) {
+      onInviteGenerated = callbacks.onInviteGenerated;
+      console.log('onInviteGenerated callback set successfully');
+    }
   }, []);
+
+  const setInviteCallbacks = useCallback((callbacks: {
+    onInviteGenerated?: (roomId: string, inviteCode: string) => void
+  }) => {
+    console.log('Setting invite callbacks in WorkletContext:', callbacks);
+
+    if (callbacks.onInviteGenerated) {
+      onInviteGenerated = callbacks.onInviteGenerated;
+      console.log('onInviteGenerated callback set successfully');
+    }
+  }, []);
+
+
 
   const reinitializeBackend = useCallback(async (): Promise<boolean> => {
     if (!rpcClient) {
@@ -479,7 +506,9 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     updateMessages,
     onRoomCreated,
     setCallbacks,
-    reinitializeBackend
+    reinitializeBackend,
+    onInviteGenerated,
+    setInviteCallbacks
   };
 
   return (

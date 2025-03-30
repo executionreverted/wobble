@@ -17,6 +17,7 @@ import { useChat } from '../../hooks/useChat';
 import { COLORS } from '../../utils/constants';
 import useUser from '../../hooks/useUser';
 import { formatTimestamp } from '../../utils/helpers';
+import RoomHeader from './RoomHeader';
 
 // Message component to render each chat message
 const MessageItem = ({ message, isOwnMessage }: any) => {
@@ -82,11 +83,14 @@ const EnhancedChatRoom = () => {
   const insets = useSafeAreaInsets();
   const flatListRef = useRef(null);
 
-  // Set room name in header
+  // Set room header with sharing functionality
   useEffect(() => {
     if (currentRoom) {
+      // Add the RoomHeader component to provide share functionality
       navigation.setOptions({
-        title: `#${currentRoom.name}`,
+        headerTitle: () => (
+          <RoomHeader roomId={currentRoom.id} roomName={currentRoom.name} />
+        )
       });
     }
   }, [currentRoom, navigation]);
