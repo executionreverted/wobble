@@ -61,6 +61,21 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
         const client = new RPC(
           IPC,
           (req: any) => {
+            if (req.command === 'backendInitialized') {
+              try {
+                const data = b4a.toString(req.data);
+                const parsedData = JSON.parse(data);
+
+                if (parsedData.success) {
+                  console.log('Backend initialized successfully');
+                  setIsBackendReady(true);
+                }
+              } catch (e) {
+                console.error('Error handling backendInitialized:', e);
+              }
+            }
+
+
             if (req.command === 'seedGenerated') {
               try {
                 const data = b4a.toString(req.data);

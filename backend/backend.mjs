@@ -1,4 +1,4 @@
-// backend.mjs
+// backend.mjs - Modified to fix UserBase initialization issue
 
 import RPC from 'bare-rpc'
 import fs from 'bare-fs'
@@ -29,6 +29,9 @@ let isBackendInitialized = false;
 // Create necessary directories
 if (!fs.existsSync(path)) {
   fs.mkdirSync(path, { recursive: true })
+}
+if (!fs.existsSync(userBasePath)) {
+  fs.mkdirSync(userBasePath, { recursive: true })
 }
 if (!fs.existsSync(roomBasePath)) {
   fs.mkdirSync(roomBasePath, { recursive: true })
@@ -68,6 +71,38 @@ const sendSeed = () => {
   const seed = genSeed()
   const req = rpc.request('seedGenerated')
   req.send(JSON.stringify(seed))
+}
+
+// Function to initialize UserBase if not already initialized
+const initializeUserBase = async () => {
+  try {
+    // If UserBase is already initialized and ready, just return it
+    if (userBase) {
+      await userBase.ready();
+      return userBase;
+    }
+
+    // Check if user directory exists
+    if (!fs.existsSync(userBasePath)) {
+      console.log('User directory does not exist');
+      return null;
+    }
+
+    // Initialize corestore if not already done
+    if (!userCorestore) {
+      userCorestore = new Corestore(userBasePath);
+      await userCorestore.ready();
+    }
+
+    // Create UserBase instance
+    userBase = new UserBase(userCorestore);
+    await userBase.ready();
+
+    return userBase;
+  } catch (error) {
+    console.error('Error initializing UserBase:', error);
+    return null;
+  }
 }
 
 const rpc = new RPC(IPC, (req, error) => {
@@ -129,7 +164,9 @@ const rpc = new RPC(IPC, (req, error) => {
 
 const updateUserProfile = async (profileData) => {
   try {
-    if (!userBase) {
+    // First ensure UserBase is initialized
+    const ub = await initializeUserBase();
+    if (!ub) {
       console.error('UserBase not initialized');
       const response = {
         success: false,
@@ -140,14 +177,12 @@ const updateUserProfile = async (profileData) => {
       return response;
     }
 
-    await userBase.ready();
-
     // Update the user profile
-    const result = await userBase.updateUserProfile(profileData);
+    const result = await ub.updateUserProfile(profileData);
 
     if (result.success) {
       // Get updated user data
-      const updatedUser = await userBase.getUserData();
+      const updatedUser = await ub.getUserData();
 
       // Send response back to the client
       const response = {
@@ -277,15 +312,16 @@ const checkExistingUser = async () => {
  *************************/
 
 // Create a new room
-// In the createRoom function in backend/backend.mjs
 const createRoom = async (roomData) => {
   try {
-    if (!userBase) {
+    // First ensure UserBase is initialized
+    const ub = await initializeUserBase();
+    if (!ub) {
       throw new Error('UserBase not initialized');
     }
 
-    await userBase.ready();
-    const user = await userBase.getUserData();
+    await ub.ready();
+    const user = await ub.getUserData();
 
     // Generate a unique room ID using our utility function
     const roomId = generateUUID();
@@ -338,10 +374,10 @@ const createRoom = async (roomData) => {
     userRooms.push(newRoom);
 
     // Update the user profile with the new rooms list
-    await userBase.updateUserProfile({ rooms: userRooms });
+    await ub.updateUserProfile({ rooms: userRooms });
 
     // Get updated user data
-    const updatedUser = await userBase.getUserData();
+    const updatedUser = await ub.getUserData();
 
     // Send updated user info back to client
     const userReq = rpc.request('userInfo');
@@ -367,6 +403,7 @@ const createRoom = async (roomData) => {
     req.send(JSON.stringify(response));
   }
 };
+
 // Initialize an existing room
 const initializeRoom = async (roomId) => {
   try {
@@ -475,11 +512,6 @@ const leaveRoom = async (roomId) => {
     }
 
     // For now, we'll keep the room initialized since we might need it again
-    // But in a real app, you might want to close it to save resources
-    // await roomBases[roomId].close();
-    // delete roomBases[roomId];
-    // await roomCorestores[roomId].close();
-    // delete roomCorestores[roomId];
   } catch (error) {
     console.error('Error leaving room:', error);
   }
@@ -539,12 +571,14 @@ const sendMessage = async (messageData) => {
 // Get all rooms the user is part of
 const getRooms = async () => {
   try {
-    if (!userBase) {
+    // First ensure UserBase is initialized
+    const ub = await initializeUserBase();
+    if (!ub) {
       throw new Error('UserBase not initialized');
     }
 
-    await userBase.ready();
-    const user = await userBase.getUserData();
+    await ub.ready();
+    const user = await ub.getUserData();
 
     let rooms = [];
 
@@ -618,6 +652,18 @@ const teardown = async () => {
 
   console.log('Backend teardown complete');
 }
+
+// Initialize UserBase at startup if account exists
+(async () => {
+  if (hasAccount()) {
+    try {
+      await initializeUserBase();
+      console.log("UserBase initialized on startup");
+    } catch (err) {
+      console.error("Failed to initialize UserBase on startup:", err);
+    }
+  }
+})();
 
 if (!isBackendInitialized) {
   isBackendInitialized = true;
