@@ -8,6 +8,7 @@ import b4a from "b4a"
 import useUser from '../hooks/useUser';
 export interface WorkletContextType {
   worklet: Worklet | null;
+  rpcClient: any;
   isInitialized: boolean;
   isLoading: boolean;
   error: Error | null;
@@ -77,6 +78,21 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
                 console.error('Error handling userCheckResult:', e)
               }
             }
+
+            if (req.command === 'profileUpdated') {
+              try {
+                const data = b4a.toString(req.data)
+                const parsedData = JSON.parse(data)
+                console.log('Profile update result:', parsedData)
+
+                if (parsedData.success && parsedData.user) {
+                  updateUser(parsedData.user)
+                }
+              } catch (e) {
+                console.error('Error handling profileUpdated:', e)
+              }
+            }
+
 
           }
         );
@@ -177,7 +193,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     error,
     generateSeedPhrase,
     confirmSeedPhrase,
-    checkExistingUser
+    checkExistingUser,
+    rpcClient
   };
 
   return (

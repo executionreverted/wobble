@@ -9,6 +9,7 @@ import LoginScreen from './components/auth/Login';
 import HomeScreen from './components/Home';
 import RoomListScreen from './components/chat/RoomList';
 import Room from './components/chat/Room';
+import ProfileScreen from './components/user/Profile';
 import { COLORS } from './utils/constants';
 import useUser from './hooks/useUser';
 import Loader from './components/common/Loading';
@@ -50,11 +51,11 @@ const MainTabs = () => {
         }}
       />
       <Tab.Screen
-        name="Settings"
-        component={SettingsPlaceholder}
+        name="Profile"
+        component={ProfileScreen}
         options={{
           tabBarIcon: ({ color, size }) => (
-            <MaterialIcons name="settings" size={size} color={color} />
+            <MaterialIcons name="person" size={size} color={color} />
           ),
         }}
       />
@@ -62,22 +63,10 @@ const MainTabs = () => {
   );
 };
 
-// Placeholder for settings (not implemented)
-const SettingsPlaceholder = () => {
-  return (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: COLORS.background }}>
-      <MaterialIcons name="settings" size={48} color={COLORS.textMuted} />
-      <Text style={{ color: COLORS.textPrimary, fontSize: 18, marginTop: 16 }}>
-        Settings would go here
-      </Text>
-    </View>
-  );
-};
-
 // Root navigation component without NavigationContainer
 const AppNavigator = () => {
   const { user } = useUser();
-  const isAuthenticated = !!user
+  const isAuthenticated = !!user;
 
   const { isInitialized, isLoading } = useWorklet();
   const [appReady, setAppReady] = useState(false);
@@ -122,7 +111,7 @@ const AppNavigator = () => {
           <Stack.Screen
             name="Chat"
             component={Room}
-            options={({ route }: any) => ({
+            options={({ route }) => ({
               title: route.params?.roomName || 'Chat',
               headerBackTitle: 'Back'
             })}

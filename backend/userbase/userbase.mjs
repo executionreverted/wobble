@@ -382,6 +382,47 @@ class UserBase extends ReadyResource {
   }
 
 
+
+  /**
+   * New method to update user profile in UserBase class
+   */
+  async updateUserProfile(profileData) {
+    if (!this.base || !this.userPubKey) {
+      return { success: false, error: 'User not initialized' };
+    }
+
+    try {
+      await this.ready();
+
+      // Get current user info
+      const existingUser = await this.getUserInfo();
+      if (!existingUser) {
+        return { success: false, error: 'User profile not found' };
+      }
+
+      // Prepare updated user data (keeping existing values for fields not in profileData)
+      const updatedUser = {
+        ...existingUser,
+        name: profileData.name !== undefined ? profileData.name : existingUser.name,
+        status: profileData.status !== undefined ? profileData.status : existingUser.status
+      };
+
+      // Dispatch the profile update
+      const dispatchData = dispatch('@userbase/set-metadata', updatedUser);
+      await this.base.append(dispatchData);
+
+      // Update local properties
+      this.userName = updatedUser.name;
+      this.userStatus = updatedUser.status;
+
+      console.log('Updated user profile:', this.userPubKey);
+      return { success: true };
+    } catch (error) {
+      console.error('Error in updateUserProfile:', error);
+      return { success: false, error: error.message || 'Failed to update profile' };
+    }
+  }
+
   async getUserInfo() {
     try {
       return await this.base.view.findOne('@userbase/metadata', {});

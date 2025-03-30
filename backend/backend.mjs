@@ -58,7 +58,65 @@ const rpc = new RPC(IPC, (req, error) => {
     createNewAccount(parsedData)
   }
 
+  if (req.command === 'updateUserProfile') {
+    const data = b4a.toString(req.data)
+    const parsedData = JSON.parse(data)
+    updateUserProfile(parsedData)
+  }
+
 })
+
+
+const updateUserProfile = async (profileData) => {
+  try {
+    if (!userBase) {
+      console.error('UserBase not initialized');
+      const response = {
+        success: false,
+        error: 'UserBase not initialized'
+      };
+      const req = rpc.request('profileUpdated');
+      req.send(JSON.stringify(response));
+      return response;
+    }
+
+    await userBase.ready();
+
+    // Update the user profile
+    const result = await userBase.updateUserProfile(profileData);
+
+    if (result.success) {
+      // Get updated user data
+      const updatedUser = await userBase.getUserData();
+
+      // Send response back to the client
+      const response = {
+        success: true,
+        user: updatedUser
+      };
+      const req = rpc.request('profileUpdated');
+      req.send(JSON.stringify(response));
+      return response;
+    } else {
+      const response = {
+        success: false,
+        error: result.error || 'Failed to update profile'
+      };
+      const req = rpc.request('profileUpdated');
+      req.send(JSON.stringify(response));
+      return response;
+    }
+  } catch (err) {
+    console.error('Error updating user profile:', err);
+    const response = {
+      success: false,
+      error: err.message || 'Unknown error updating profile'
+    };
+    const req = rpc.request('profileUpdated');
+    req.send(JSON.stringify(response));
+    return response;
+  }
+}
 
 // For a clean start
 // if (fs.existsSync(path)) {
