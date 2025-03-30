@@ -5,20 +5,36 @@ import fs from 'bare-fs'
 import Corestore from 'corestore'
 import bip39 from "bip39"
 import b4a from "b4a"
-import crypto from "bare-crypto"
 import Hypercore from 'hypercore'
 import Hyperblobs from 'hyperblobs'
 const { IPC } = BareKit
 import UserBase from './userbase/userbase.mjs'
 import RoomBase from './roombase/roombase.mjs'
 import { generateUUID } from './utils.mjs'
-const path =
-  Bare.argv[0] === 'android'
+import process from "bare-process"
+
+// const path =
+//   Bare.argv[0] === 'android'
+//     ? '/data/data/to.holepunch.bare.expo/autopass-example'
+//     : './tmp/autopass-example/'
+
+const getDataPath = () => {
+  // Get instance identifier - can be passed as a launch parameter or from env
+  const instanceId = Math.ceil(Math.random() * 100)
+
+  // Base path depends on platform
+  const basePath = Bare.argv[0] === 'android'
     ? '/data/data/to.holepunch.bare.expo/autopass-example'
-    : './tmp/autopass-example/'
+    : './tmp/autopass-example';
+
+  // Append instance ID if provided
+  return instanceId ? `${basePath}-${instanceId}` : basePath;
+};
+
+const path = getDataPath();
 const userBasePath = path + 'userbase/'
 const roomBasePath = path + 'roombase/'
-
+let trying;
 // Global variables
 let userCorestore;
 let userBase;
@@ -983,12 +999,102 @@ const cleanupResources = async () => {
 
 
 
-let trying;
-// Reinitialize backend after cleanup
-// In backend.mjs, replace the reinitializeBackend function with this improved version:
+
+
+const preInitializeAllRooms = async () => {
+  try {
+    // First check if user is initialized
+    const ub = await initializeUserBase();
+    if (!ub) {
+      console.log('User base not initialized yet, skipping room pre-initialization');
+      return;
+    }
+
+    await ub.ready();
+    const userData = await ub.getUserData();
+
+    if (!userData.rooms || !Array.isArray(userData.rooms) || userData.rooms.length === 0) {
+      console.log('No rooms to pre-initialize');
+      return;
+    }
+
+    console.log(`Pre-initializing ${userData.rooms.length} rooms for user`);
+
+    // Initialize all rooms in parallel for better performance
+    const promises = userData.rooms.map(async (roomData) => {
+      try {
+        // Skip if already initialized
+        if (roomBases[roomData.id]) {
+          console.log(`Room ${roomData.id} already initialized`);
+          return;
+        }
+
+        // Initialize the room
+        const room = await initializeRoom(roomData);
+
+        if (room) {
+          console.log(`Pre-initialized room: ${roomData.id} (${roomData.name})`);
+
+          // Set up message listener if not already set
+          if (!room._hasMessageListener) {
+            room.on('new-message', (msg) => {
+              // Format the message
+              const formattedMessage = {
+                id: msg.id,
+                roomId: roomData.id,
+                content: msg.content,
+                sender: msg.sender,
+                timestamp: msg.timestamp,
+                system: msg.system || false
+              };
+
+              // Send to client
+              const req = rpc.request('newMessage');
+              req.send(JSON.stringify({
+                success: true,
+                message: formattedMessage
+              }));
+            });
+
+            room._hasMessageListener = true;
+            console.log(`Message listener set up for room ${roomData.id}`);
+          }
+        }
+      } catch (error) {
+        console.error(`Error pre-initializing room ${roomData.id}:`, error);
+      }
+    });
+
+    await Promise.allSettled(promises);
+    console.log('Pre-initialization of rooms complete');
+  } catch (error) {
+    console.error('Error in preInitializeAllRooms:', error);
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Enhanced teardown function
+const teardown = async () => {
+  console.log('Performing teardown...');
+  await cleanupResources();
+  console.log('Teardown complete');
+}
 
 const reinitializeBackend = async () => {
-  console.log('Reinitializing backend...');
+  console.log('Reinitializing backend with room preloading...');
   if (trying) return;
   trying = true;
 
@@ -1003,6 +1109,9 @@ const reinitializeBackend = async () => {
     if (hasAccount()) {
       console.log('Reinitializing user account...');
       await initializeUserBase();
+
+      // Pre-initialize all rooms to enable real-time updates from the start
+      await preInitializeAllRooms();
 
       // Notify client that backend is ready
       const req = rpc.request('backendInitialized');
@@ -1033,15 +1142,12 @@ const reinitializeBackend = async () => {
     isBackendInitialized = true;
     console.log('Backend reinitialization complete');
   }
-}
-// Enhanced teardown function
-const teardown = async () => {
-  console.log('Performing teardown...');
-  await cleanupResources();
-  console.log('Teardown complete');
-}
+};
 
-if (!isBackendInitialized) {
-  isBackendInitialized = true
-  reinitializeBackend()
+// Add this line at the end of your initialization logic in backend.mjs
+if (isBackendInitialized) {
+  // Begin pre-loading rooms in the background for real-time updates
+  preInitializeAllRooms().catch(err => {
+    console.error('Error during room pre-initialization:', err);
+  });
 }

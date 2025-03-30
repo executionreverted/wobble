@@ -77,31 +77,10 @@ const EnhancedChatRoom = () => {
   const { currentRoom, messages, sendMessage, loadMoreMessages } = useChat();
   const { user } = useUser();
   const [messageText, setMessageText] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const flatListRef = useRef(null);
-
-  // Add debug logging for messages
-  useEffect(() => {
-    console.log("Room component: Messages updated", {
-      count: messages?.length || 0,
-      currentRoomId: currentRoom?.id || 'no room selected'
-    });
-
-    if (messages && messages.length > 0) {
-      // Log the first message to debug format issues
-      console.log("First message sample:", JSON.stringify(messages[0]));
-    } else {
-      console.log("No messages to display");
-    }
-  }, [messages, currentRoom]);
-
-  // Debug logging for current room
-  useEffect(() => {
-    console.log("Room component: Current room updated", currentRoom?.id || 'no room');
-  }, [currentRoom]);
 
   // Set room name in header
   useEffect(() => {
@@ -111,16 +90,6 @@ const EnhancedChatRoom = () => {
       });
     }
   }, [currentRoom, navigation]);
-
-  // Simulate loading state
-  useEffect(() => {
-    // Set loading to false after messages are loaded or after 2 seconds
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 2000);
-
-    return () => clearTimeout(timer);
-  }, []);
 
   // Function to handle sending a message
   const handleSendMessage = async () => {
@@ -137,7 +106,6 @@ const EnhancedChatRoom = () => {
   // Function to render each message
   const renderItem = ({ item }: any) => {
     if (!item) {
-      console.warn('Undefined message in renderItem');
       return null;
     }
 
@@ -166,16 +134,6 @@ const EnhancedChatRoom = () => {
           ? `No messages yet in ${currentRoom.name}. Be the first to send a message!`
           : 'No room selected'}
       </Text>
-
-      {/* Debug info - you can remove this in production */}
-      <View style={{ marginTop: 20, padding: 10, backgroundColor: COLORS.tertiaryBackground }}>
-        <Text style={{ color: COLORS.textMuted, fontSize: 12 }}>
-          Debug Info: {"\n"}
-          Room ID: {currentRoom?.id || 'none'}{"\n"}
-          Messages: {messages?.length || 0}{"\n"}
-          User: {user?.name || 'none'}
-        </Text>
-      </View>
     </View>
   );
 
@@ -183,9 +141,15 @@ const EnhancedChatRoom = () => {
   const handleLoadMore = useCallback(() => {
     if (isLoadingMore || !loadMoreMessages) return;
 
-    loadMoreMessages().catch(err => {
-      console.error('Error loading more messages:', err);
-    });
+    setIsLoadingMore(true);
+    loadMoreMessages()
+      .then(() => {
+        setIsLoadingMore(false);
+      })
+      .catch(err => {
+        console.error('Error loading more messages:', err);
+        setIsLoadingMore(false);
+      });
   }, [isLoadingMore, loadMoreMessages]);
 
   // Render the loading indicator for older messages
@@ -199,16 +163,6 @@ const EnhancedChatRoom = () => {
       </View>
     );
   };
-
-  // Show loading state if messages are still loading
-  if (isLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={styles.loadingText}>Loading messages...</Text>
-      </View>
-    );
-  }
 
   return (
     <KeyboardAvoidingView

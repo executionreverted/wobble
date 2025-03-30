@@ -1,8 +1,7 @@
-import React, { createContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import { Room, Message, User, ChatContextType } from '../types';
 import useUser from '../hooks/useUser';
 import useWorklet from '../hooks/useWorklet';
-
 
 interface MessagesByRoom {
   [roomId: string]: Message[];
@@ -37,16 +36,18 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
   const [currentRoom, setCurrentRoom] = useState<Room | null>(null);
   const [messagesByRoom, setMessagesByRoom] = useState<{ [roomId: string]: Message[] }>({});
   const [onlineUsers, setOnlineUsers] = useState<User[]>([]);
-  const [hasMoreMessages, setHasMoreMessages] = useState<boolean>(true);
-  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+  const [hasMoreMessagesByRoom, setHasMoreMessagesByRoom] = useState<{ [roomId: string]: boolean }>({});
+  const [isLoadingByRoom, setIsLoadingByRoom] = useState<{ [roomId: string]: boolean }>({});
+
+  // Keep track of which rooms have been initialized
+  const initializedRooms = useRef<Set<string>>(new Set());
 
   // Get current room's messages
   const getCurrentMessages = useCallback(() => {
     return currentRoom ? (messagesByRoom[currentRoom.id] || []) : [];
   }, [currentRoom, messagesByRoom]);
 
-
-  // Initialize rooms from backend when worklet is ready
+  // Initialize callbacks for real-time updates
   useEffect(() => {
     if (isInitialized && rpcClient) {
       console.log('ChatContext: Registering callbacks with WorkletContext');
@@ -55,6 +56,48 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       const updateRoomsCallback = (updatedRooms: Room[]) => {
         console.log('ChatContext: Received rooms update', updatedRooms.length);
         setRooms(updatedRooms);
+
+        // Pre-initialize message containers for each room
+        updatedRooms.forEach(room => {
+          setMessagesByRoom(prev => {
+            if (!prev[room.id]) {
+              return {
+                ...prev,
+                [room.id]: []
+              };
+            }
+            return prev;
+          });
+
+          // Set default values for each room
+          setHasMoreMessagesByRoom(prev => ({
+            ...prev,
+            [room.id]: true
+          }));
+
+          setIsLoadingByRoom(prev => ({
+            ...prev,
+            [room.id]: false
+          }));
+        });
+
+        // Request messages for all rooms to preload
+        updatedRooms.forEach(room => {
+          if (!initializedRooms.current.has(room.id)) {
+            // Only initialize rooms we haven't initialized yet
+            initializedRooms.current.add(room.id);
+
+            // Request messages in background
+            if (rpcClient) {
+              try {
+                const request = rpcClient.request('joinRoom');
+                request.send(JSON.stringify({ roomId: room.id }));
+              } catch (error) {
+                console.error(`Error pre-initializing room ${room.id}:`, error);
+              }
+            }
+          }
+        });
       };
 
       const updateMessagesCallback = (newMessages: Message[], replace = false) => {
@@ -62,8 +105,8 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
 
         if (!newMessages || newMessages.length === 0) return;
 
-        // Get roomId from the first message or current room
-        const roomId = newMessages[0]?.roomId || (currentRoom ? currentRoom.id : null);
+        // Get roomId from the first message
+        const roomId = newMessages[0]?.roomId;
 
         if (!roomId) {
           console.error('Cannot determine roomId for messages');
@@ -77,7 +120,7 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
           if (replace) {
             // Replace entire message list for this room
             updatedMessages = [...newMessages].sort((a, b) => b.timestamp - a.timestamp);
-            console.log('Replacing with messages:', updatedMessages.length);
+            console.log(`Replacing with ${updatedMessages.length} messages for room ${roomId}`);
           } else {
             // Merge existing and new messages without duplicates
             const messageMap = new Map();
@@ -91,7 +134,21 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
             // Convert back to array and sort
             updatedMessages = Array.from(messageMap.values())
               .sort((a, b) => b.timestamp - a.timestamp);
-            console.log('Updated messages count:', updatedMessages.length);
+            console.log(`Updated messages count: ${updatedMessages.length} for room ${roomId}`);
+          }
+
+          // Update loading status for this room
+          setIsLoadingByRoom(prev => ({
+            ...prev,
+            [roomId]: false
+          }));
+
+          // Update hasMore flag for this room
+          if (newMessages.length < 20 && !replace) {
+            setHasMoreMessagesByRoom(prev => ({
+              ...prev,
+              [roomId]: false
+            }));
           }
 
           // Return updated messagesByRoom
@@ -100,13 +157,6 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
             [roomId]: updatedMessages
           };
         });
-
-        // Update hasMoreMessages flag
-        if (newMessages.length < 20) {
-          setHasMoreMessages(false);
-        } else {
-          setHasMoreMessages(true);
-        }
       };
 
       const roomCreatedCallback = (room: Room) => {
@@ -122,6 +172,24 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
             return [...prev, room];
           }
         });
+
+        // Initialize the room's message containers
+        setMessagesByRoom(prev => ({
+          ...prev,
+          [room.id]: []
+        }));
+
+        setHasMoreMessagesByRoom(prev => ({
+          ...prev,
+          [room.id]: true
+        }));
+
+        setIsLoadingByRoom(prev => ({
+          ...prev,
+          [room.id]: false
+        }));
+
+        initializedRooms.current.add(room.id);
       };
 
       // Register the callbacks with WorkletContext
@@ -134,11 +202,35 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       // Fetch rooms when the component mounts or worklet is initialized
       refreshRooms();
     }
-  }, [isInitialized, rpcClient, currentRoom?.id]);
+  }, [isInitialized, rpcClient]);
 
+  // Update rooms when user data changes
   useEffect(() => {
     if (user && user.rooms) {
       setRooms(user.rooms);
+
+      // Initialize message containers for user's rooms
+      user.rooms.forEach(room => {
+        setMessagesByRoom(prev => {
+          if (!prev[room.id]) {
+            return {
+              ...prev,
+              [room.id]: []
+            };
+          }
+          return prev;
+        });
+
+        setHasMoreMessagesByRoom(prev => ({
+          ...prev,
+          [room.id]: true
+        }));
+
+        setIsLoadingByRoom(prev => ({
+          ...prev,
+          [room.id]: false
+        }));
+      });
     }
   }, [user]);
 
@@ -150,7 +242,6 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       const request = rpcClient.request('getRooms');
       await request.send();
       // The response will be handled by the RPC event handler in WorkletContext
-      // which will update the rooms array
     } catch (error) {
       console.error('Error refreshing rooms:', error);
     }
@@ -179,24 +270,35 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
 
   const selectRoom = async (room: Room) => {
     console.log('ChatContext: Selecting room', room.id);
-    setHasMoreMessages(true); // Reset pagination state
     setCurrentRoom(room);
 
-    // Clear the current messages for the room to avoid showing stale data
-    setMessagesByRoom(prev => ({
-      ...prev,
-      [room.id]: [] // Clear existing messages
-    }));
+    // If we don't have messages for this room or they're not populated yet
+    if (!messagesByRoom[room.id] || messagesByRoom[room.id].length === 0) {
+      if (!initializedRooms.current.has(room.id)) {
+        initializedRooms.current.add(room.id);
 
-    // Call backend to join room if we have a worklet
-    if (rpcClient && isInitialized) {
-      try {
-        console.log('ChatContext: Sending joinRoom request to backend', room.id);
-        const request = rpcClient.request('joinRoom');
-        await request.send(JSON.stringify({ roomId: room.id }));
-        // Response will be handled in WorkletContext and will update messages
-      } catch (error) {
-        console.error('Error joining room:', error);
+        // Set loading state for this room
+        setIsLoadingByRoom(prev => ({
+          ...prev,
+          [room.id]: true
+        }));
+
+        // Request messages
+        if (rpcClient && isInitialized) {
+          try {
+            console.log('ChatContext: Sending joinRoom request to backend', room.id);
+            const request = rpcClient.request('joinRoom');
+            await request.send(JSON.stringify({ roomId: room.id }));
+          } catch (error) {
+            console.error('Error joining room:', error);
+
+            // Reset loading state on error
+            setIsLoadingByRoom(prev => ({
+              ...prev,
+              [room.id]: false
+            }));
+          }
+        }
       }
     }
 
@@ -223,7 +325,6 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
       }
     }
     setCurrentRoom(null);
-    setHasMoreMessages(true);
   };
 
   const sendMessage = async (text: string) => {
@@ -239,8 +340,6 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
 
       const request = rpcClient.request('sendMessage');
       await request.send(JSON.stringify(messageData));
-
-      // The actual message will be updated via the RPC event handler in WorkletContext
     } catch (error) {
       console.error('Error sending message:', error);
     }
@@ -248,7 +347,15 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
 
   // Load older messages (for pagination)
   const loadMoreMessages = async (): Promise<boolean> => {
-    if (!currentRoom || !rpcClient || !isInitialized || isLoadingMore || !hasMoreMessages) {
+    if (!currentRoom || !rpcClient || !isInitialized) {
+      return false;
+    }
+
+    // Check if we are already loading or have no more messages
+    const isLoading = isLoadingByRoom[currentRoom.id] || false;
+    const hasMore = hasMoreMessagesByRoom[currentRoom.id] || false;
+
+    if (isLoading || !hasMore) {
       return false;
     }
 
@@ -261,7 +368,11 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
     const oldestMessage = messages[messages.length - 1];
 
     try {
-      setIsLoadingMore(true);
+      // Set loading state for this room
+      setIsLoadingByRoom(prev => ({
+        ...prev,
+        [currentRoom.id]: true
+      }));
 
       // Create request with oldest message timestamp as a reference point
       const request = rpcClient.request('loadMoreMessages');
@@ -271,34 +382,38 @@ export const ChatProvider: React.FC<ChatProviderProps> = ({ children }) => {
         limit: 20 // Number of messages to load
       }));
 
-      // The response will be handled in the WorkletContext callback
-      // Set loading to false after a reasonable timeout
-      setTimeout(() => {
-        setIsLoadingMore(false);
-      }, 5000);
-
       return true;
     } catch (error) {
       console.error('Error loading more messages:', error);
-      setIsLoadingMore(false);
+
+      // Reset loading state on error
+      setIsLoadingByRoom(prev => ({
+        ...prev,
+        [currentRoom.id]: false
+      }));
+
       return false;
     }
   };
 
+  // Append current room's loading state to messages
+  const messagesWithLoadingState = getCurrentMessages();
+  const isCurrentRoomLoading = currentRoom ? (isLoadingByRoom[currentRoom.id] || false) : false;
 
   return (
     <ChatContext.Provider
       value={{
         rooms,
         currentRoom,
-        messages: getCurrentMessages(),
+        messages: messagesWithLoadingState,
         onlineUsers,
         selectRoom,
         leaveRoom,
         sendMessage,
         refreshRooms,
         createRoom,
-        loadMoreMessages
+        loadMoreMessages,
+        isLoading: isCurrentRoomLoading
       }}
     >
       {children}

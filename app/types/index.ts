@@ -35,12 +35,12 @@ export type AuthContextType = {
   register: (username: string, password: string) => Promise<void>;
 };
 
-
 export type ChatContextType = {
   rooms: Room[];
   currentRoom: Room | null;
   messages: Message[]; // This is now a computed value from messagesByRoom
   onlineUsers: User[];
+  isLoading?: boolean; // Loading state for the current room
   selectRoom: (room: Room) => Promise<void>;
   leaveRoom: () => void;
   sendMessage: (text: string) => Promise<void>;
