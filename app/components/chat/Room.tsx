@@ -8,7 +8,8 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator
+  ActivityIndicator,
+  Keyboard
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -79,9 +80,36 @@ const EnhancedChatRoom = () => {
   const { user } = useUser();
   const [messageText, setMessageText] = useState('');
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [inputHeight, setInputHeight] = useState(44); // Default single line height
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const flatListRef = useRef(null);
+
+  // Handle text input content size change
+  const handleContentSizeChange = (event) => {
+    const { height } = event.nativeEvent.contentSize;
+    // Constrain height between min and max values
+    const newHeight = Math.min(Math.max(44, height), 120); // min: ~1 line, max: ~4 lines
+    setInputHeight(newHeight);
+  };
+
+  // Add keyboard listeners to track keyboard visibility
+  useEffect(() => {
+    const keyboardWillShowListener = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => setKeyboardVisible(true)
+    );
+    const keyboardWillHideListener = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setKeyboardVisible(false)
+    );
+
+    return () => {
+      keyboardWillShowListener.remove();
+      keyboardWillHideListener.remove();
+    };
+  }, []);
 
   // Set room header with sharing functionality
   useEffect(() => {
@@ -102,6 +130,7 @@ const EnhancedChatRoom = () => {
     try {
       await sendMessage(messageText.trim());
       setMessageText('');
+      setInputHeight(44); // Reset input height to single line
     } catch (error) {
       console.error('Error sending message:', error);
     }
@@ -171,46 +200,53 @@ const EnhancedChatRoom = () => {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        renderItem={renderItem}
-        keyExtractor={(item) => item?.id || `fallback-${Math.random()}`}
-        contentContainerStyle={styles.messagesList}
-        inverted={true} // Display newest messages at the bottom
-        onEndReached={handleLoadMore}
-        onEndReachedThreshold={0.5}
-        ListFooterComponent={renderFooter}
-        ListEmptyComponent={EmptyMessagesList}
-      />
-
-      <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
-        <TextInput
-          style={styles.input}
-          value={messageText}
-          onChangeText={setMessageText}
-          placeholder="Type a message..."
-          placeholderTextColor={COLORS.textMuted}
-          multiline
-          maxLength={1000}
-        />
-        <TouchableOpacity
-          style={[
-            styles.sendButton,
-            !messageText.trim() && styles.disabledButton
+      <View style={styles.chatContainer}>
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          renderItem={renderItem}
+          keyExtractor={(item) => item?.id || `fallback-${Math.random()}`}
+          contentContainerStyle={[
+            styles.messagesList,
+            { paddingBottom: keyboardVisible ? 80 : 10 }
           ]}
-          onPress={handleSendMessage}
-          disabled={!messageText.trim()}
-        >
-          <MaterialIcons
-            name="send"
-            size={24}
-            color={messageText.trim() ? COLORS.textPrimary : COLORS.textMuted}
+          inverted={true} // Display newest messages at the bottom
+          onEndReached={handleLoadMore}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={renderFooter}
+          ListEmptyComponent={EmptyMessagesList}
+        />
+
+        <View style={[styles.inputContainer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+          <TextInput
+            style={[styles.input, { height: inputHeight }]}
+            value={messageText}
+            onChangeText={setMessageText}
+            placeholder="Type a message..."
+            placeholderTextColor={COLORS.textMuted}
+            multiline
+            maxLength={1000}
+            onContentSizeChange={handleContentSizeChange}
+            textAlignVertical="top"
           />
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.sendButton,
+              !messageText.trim() && styles.disabledButton
+            ]}
+            onPress={handleSendMessage}
+            disabled={!messageText.trim()}
+          >
+            <MaterialIcons
+              name="send"
+              size={24}
+              color={messageText.trim() ? COLORS.textPrimary : COLORS.textMuted}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
@@ -220,6 +256,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
+  },
+  chatContainer: {
+    flex: 1,
+    position: 'relative',
   },
   messagesList: {
     flexGrow: 1,
@@ -337,16 +377,16 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: COLORS.separator,
     alignItems: 'center',
+    width: '100%',
   },
   input: {
     flex: 1,
     backgroundColor: COLORS.input,
     borderRadius: 20,
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    maxHeight: 100,
+    paddingVertical: 14,
     color: COLORS.textPrimary,
-    fontSize: 15,
+    fontSize: 14,
   },
   sendButton: {
     marginLeft: 10,
