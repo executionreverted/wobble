@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
 import { Worklet } from 'react-native-bare-kit';
 import * as FileSystem from "expo-file-system"
 import { Alert, Platform } from 'react-native';
@@ -70,6 +70,8 @@ export interface WorkletContextType {
   cacheSize: number;
   clearCache: () => Promise<void>;
   getCacheInfo: () => { size: number, files: number };
+  isCacheInitialized: boolean;
+  cacheInitPromise: Promise<void>
 }
 
 export const WorkletContext = createContext<WorkletContextType>(undefined as any);
@@ -86,6 +88,9 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const [isBackendReady, setIsBackendReady] = useState(false);
+  const [isCacheInitialized, setIsCacheInitialized] = useState(false);
+  const cacheInitPromise = useRef<Promise<void> | null>(null);
+
   const [fileDownloads, setFileDownloads] = useState<{
     [key: string]: {
       progress: number;
@@ -109,6 +114,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
 
   const initializeCache = useCallback(async () => {
     try {
+      console.log('Initialize CacheStorage')
       // Create cache directory if it doesn't exist
       const dirInfo = await FileSystem.getInfoAsync(CACHE_FILE_DIR);
       if (!dirInfo.exists) {
@@ -119,9 +125,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       const metadataString = await AsyncStorage.getItem(CACHE_METADATA_KEY);
       if (metadataString) {
         const metadata = JSON.parse(metadataString);
+        console.log('Found cache: ', metadataString)
         setCacheMetadata(metadata);
-
-        console.log({ metadata })
 
         // Calculate current cache size
         const totalSize = Object.values(metadata).reduce((sum, item) => sum + (item.size || 0), 0);
@@ -129,9 +134,21 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
 
         console.log(`Cache initialized: ${Object.keys(metadata).length} files, ${(totalSize / (1024 * 1024)).toFixed(2)}MB`);
       }
+
+      // Set initialization flag
+      setIsCacheInitialized(true);
+      return true
     } catch (error) {
       console.error('Error initializing file cache:', error);
+      // Even on error, mark as initialized to prevent hanging
+      setIsCacheInitialized(true);
     }
+  }, []);
+
+  // Then update the useEffect
+  useEffect(() => {
+    // Create a promise that resolves when cache is initialized
+    cacheInitPromise.current = initializeCache() as any;
   }, []);
 
   const saveCacheMetadata = useCallback(async (metadata: any) => {
@@ -161,7 +178,6 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
         actualSize = fileInfo.size || fileData.length * 0.75; // Approximation for base64
       }
 
-      console.log('UPDATEEEE', cacheMetadata)
 
       // Update cache metadata
       const newMetadata = {
@@ -177,6 +193,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       };
 
 
+      console.log('UPDATEEEE', newMetadata)
       setCacheMetadata(newMetadata);
       setCacheSize(prev => prev + actualSize);
       await saveCacheMetadata(newMetadata);
@@ -191,10 +208,13 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       console.error('Error adding file to cache:', error);
       return null;
     }
-  }, [cacheMetadata, cacheSize, saveCacheMetadata]);
+  }, [cacheMetadata?.legth, cacheMetadata, cacheSize, saveCacheMetadata]);
 
 
   const getFromCache = useCallback(async (cacheKey) => {
+    if (!isCacheInitialized && cacheInitPromise.current) {
+      await cacheInitPromise.current;
+    }
     try {
       const cachedItem = cacheMetadata[cacheKey];
       if (!cachedItem) return null;
@@ -667,7 +687,6 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
               try {
                 const data = b4a.toString(req.data);
                 const parsedData = JSON.parse(data);
-                console.log('File download progress:', parsedData);
 
                 onFileDownloadProgress(parsedData);
               } catch (e) {
@@ -909,14 +928,14 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       const processedAttachmentId = createStableBlobId(attachmentId);
       const uniqueDownloadKey = attachmentKey ||
         (roomId && processedAttachmentId ?
-          `${roomId}_${processedAttachmentId}` :
-          `download_${Date.now()}`);
+          `${roomId}_${processedAttachmentId}` : null
+        );
 
       if (!uniqueDownloadKey) {
         console.error('Missing attachment identifier in downloaded file data');
         return;
       }
-
+      console.log('SET CACHE FOR:', uniqueDownloadKey)
       console.log(`File download complete for ${uniqueDownloadKey}, preview: ${preview}, size: ${fileData ? (fileData.length / 1024).toFixed(2) : 0}KB`);
 
       if (success && fileData) {
@@ -1181,6 +1200,10 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
   const downloadFile = async (roomId: string, attachment: any, preview = false, attachmentKey?: string) => {
     if (!rpcClient) return false;
 
+    if (!isCacheInitialized && await cacheInitPromise.current) {
+      console.log('Waiting cache to init..')
+      await cacheInitPromise.current;
+    }
     try {
       // Generate a unique key for this download if not provided
       const blobId = createStableBlobId(attachment.blobId);
@@ -1190,6 +1213,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       if (preview || !attachment.skipCache) {
         const cachedFile = await getFromCache(downloadKey);
         if (cachedFile) {
+          console.log('CACHE EXISTS!')
           console.log(`Loading ${attachment.name} from cache`);
 
           // Update the download progress immediately to 100%
@@ -1211,6 +1235,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
         }
       }
 
+
+      console.log('NO CACHE FOUND. PREPARE TO FETCH!', downloadKey)
       // Reset progress for this attachment using the unique key
       setFileDownloads(prev => ({
         ...prev,
@@ -1267,6 +1293,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       size: cacheSize,
       files: Object.keys(cacheMetadata).length
     }),
+    isCacheInitialized,
+    cacheInitPromise: cacheInitPromise.current
   };
 
   return (

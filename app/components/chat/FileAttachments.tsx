@@ -199,7 +199,7 @@ export const EnhancedFileAttachment = ({ handleAttachmentPress, attachment, room
 };
 
 export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roomId }: any) => {
-  const { fileDownloads, downloadFile } = useWorklet();
+  const { fileDownloads, downloadFile, isCacheInitialized, cacheInitPromise } = useWorklet();
   const [isDownloading, setIsDownloading] = useState(false);
   const [localPreviewUri, setLocalPreviewUri] = useState(null);
   const [autoDownloadInitiated, setAutoDownloadInitiated] = useState(false);
@@ -242,7 +242,7 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
       !autoDownloadInitiated &&
       !isDownloading &&
       !hasPreview &&
-      isImageFile(attachment.name);
+      isImageFile(attachment.name) && isCacheInitialized;
 
     if (shouldAutoDownload) {
       console.log(`Auto-downloading preview for ${attachment.name}`);
