@@ -1675,14 +1675,8 @@ const resolveFilePath = async (suggestedPath) => {
     if (Bare.argv[0] === 'android') {
       // Check if path starts with content:// or file://
       if (normalizedPath.startsWith('content://')) {
-        // For content:// URIs, use FileSystem API to get actual file path
         // Note: This might need to be handled differently in a Bare environment
-        try {
-          const fileInfo = await FileSystem.getContentUriAsync(normalizedPath);
-          normalizedPath = fileInfo;
-        } catch (contentUriError) {
-          console.error('Error resolving content URI:', contentUriError);
-        }
+        normalizedPath = normalizedPath.replace('content://')
       }
     }
 
@@ -1695,16 +1689,6 @@ const resolveFilePath = async (suggestedPath) => {
       fileExists = fs.existsSync(normalizedPath);
     } catch (barefsError) {
       console.error('bare-fs file check error:', barefsError);
-    }
-
-    // If bare-fs check fails, try FileSystem
-    if (!fileExists) {
-      try {
-        const fileInfo = await FileSystem.getInfoAsync(normalizedPath);
-        fileExists = fileInfo.exists;
-      } catch (fileSystemError) {
-        console.error('FileSystem file check error:', fileSystemError);
-      }
     }
 
     if (!fileExists) {
