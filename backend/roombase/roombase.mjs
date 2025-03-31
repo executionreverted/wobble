@@ -789,56 +789,107 @@ class RoomBase extends ReadyResource {
 
 
   // Add this to RoomBase class in roombase.mjs
+  // Enhanced downloadFileToPath method for RoomBase in roombase.mjs
   async downloadFileToPath(file, outputPath, options = {}) {
-    const { timeout = 60000, onProgress } = options;
+    const {
+      timeout = 60000,
+      onProgress,
+      preview = false,
+      platformOS
+    } = options;
+
     let blobRef = file;
     let remoteCore = null;
     let topic = null;
     let localSwarm = null;
-
     const tempDir = path.join(path.dirname(outputPath), `temp-download-${Date.now()}`);
+
     try {
-      // Create temp dir
+      console.log('Download File to Path Details:', {
+        outputPath,
+        blobRef,
+        platformOS,
+        preview
+      });
+
+      // Ensure output directory exists
+      const outputDir = path.dirname(outputPath);
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+
+      // Create temp directory
       if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir, { recursive: true });
       }
 
-      // Get core key
+      // Check if this is our own blob store first
+      if (this.blobStore && blobRef.coreKey &&
+        blobRef.coreKey === this.blobCore.key.toString('hex')) {
+
+        console.log('Attempting to retrieve from local blob store');
+
+        try {
+          // Ensure blobId is properly formatted
+          const blobId = typeof blobRef.blobId === 'object'
+            ? blobRef.blobId
+            : blobRef.blobId;
+
+          const localBlob = await this.blobStore.get(blobId);
+
+          if (localBlob) {
+            console.log('Local blob retrieved successfully, writing to file');
+
+            fs.writeFileSync(outputPath, localBlob);
+
+            if (onProgress) {
+              onProgress(100, "Local blob retrieved and saved");
+            }
+
+            return outputPath;
+          }
+        } catch (localError) {
+          console.error('Error retrieving local blob:', localError);
+        }
+      }
+
+      // Prepare core key
       const coreKey = typeof blobRef.coreKey === 'string'
-        ? Buffer.from(blobRef.coreKey, 'hex')
+        ? b4a.from(blobRef.coreKey, 'hex')
         : blobRef.coreKey;
 
-      if (onProgress) onProgress(10, "Connecting to peer");
-
-      // Set up hypercore for streaming
+      // Create hypercore for streaming
       remoteCore = new Hypercore(tempDir, coreKey, { wait: true });
-      await remoteCore.ready();
+      if (onProgress) onProgress(10, "Connected to core");
 
-      if (onProgress) onProgress(20, "Connected");
+      await remoteCore.ready();
+      if (onProgress) onProgress(20, "Core ready");
 
       localSwarm = new Hyperswarm();
       topic = await localSwarm.join(coreKey);
+      if (onProgress) onProgress(30, "Joined swarm");
 
       // Set up replication
       localSwarm.on('connection', (conn) => {
         remoteCore.replicate(conn);
-        if (onProgress) onProgress(30, "Streaming started");
+        if (onProgress) onProgress(40, "Replication started");
       });
 
       // Wait for peers
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 3000));
       await remoteCore.update({ wait: true });
 
       // Create hyperblobs for streaming
       const remoteBlobs = new Hyperblobs(remoteCore);
       await remoteBlobs.ready();
-
-      if (onProgress) onProgress(40, "Ready to download");
+      if (onProgress) onProgress(50, "Hyperblob ready");
 
       // Get the blob ID
-      const blobId = typeof blobRef.blobId === 'object' ? blobRef.blobId : blobRef.blobId;
+      const blobId = typeof blobRef.blobId === 'object'
+        ? blobRef.blobId
+        : blobRef.blobId;
 
-      // Create a write stream to file
+      // Create write stream to file
       const writeStream = fs.createWriteStream(outputPath);
       const blobSize = blobRef.size || 0;
       let bytesWritten = 0;
@@ -854,7 +905,7 @@ class RoomBase extends ReadyResource {
 
           // Report progress
           if (onProgress && blobSize > 0) {
-            const percentage = 40 + Math.floor(55 * (bytesWritten / blobSize));
+            const percentage = 50 + Math.floor(45 * (bytesWritten / blobSize));
             onProgress(Math.min(95, percentage), "Downloading...");
           }
         });
@@ -877,30 +928,40 @@ class RoomBase extends ReadyResource {
       if (onProgress) onProgress(100, "Download complete");
 
       // Clean up
-      await localSwarm.destroy();
-      if (topic) await topic.destroy().catch(noop);
-      if (remoteBlobs && remoteBlobs.close) await remoteBlobs.close().catch(noop);
-      if (remoteCore) await remoteCore.close().catch(noop);
+      if (localSwarm) await localSwarm.destroy().catch(() => { });
+      if (topic) await topic.destroy().catch(() => { });
+      if (remoteBlobs && remoteBlobs.close) await remoteBlobs.close().catch(() => { });
+      if (remoteCore) await remoteCore.close().catch(() => { });
 
-      // Remove temp directory
-      fs.rmSync(tempDir, { recursive: true, force: true });
+      // Try to remove temp directory
+      try {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch (rmErr) {
+        console.error('Error removing temp directory:', rmErr);
+      }
 
       return outputPath;
     } catch (err) {
-      console.error('Error streaming file to path:', err);
-      // Clean up on error
+      console.error('Comprehensive Blob Retrieval Error:', {
+        message: err.message,
+        stack: err.stack,
+        blobRef,
+        outputPath
+      });
+
+      // Cleanup on error
       try {
-        if (localSwarm) await localSwarm.destroy().catch(noop);
-        if (topic) await topic.destroy().catch(noop);
-        if (remoteCore) await remoteCore.close().catch(noop);
-        if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+        if (localSwarm) await localSwarm.destroy().catch(() => { });
+        if (topic) await topic.destroy().catch(() => { });
+        if (remoteCore) await remoteCore.close().catch(() => { });
+        fs.rmSync(tempDir, { recursive: true, force: true });
       } catch (cleanupErr) {
         console.error('Error during cleanup:', cleanupErr);
       }
+
       throw err;
     }
   }
-
 
 
 
@@ -991,7 +1052,7 @@ class RoomBase extends ReadyResource {
   }
 
   // Function to join a room by invite code - with consistent room ID
-  async joinRoomByInvite(inviteCode) {
+  async joinRoomByInvite(inviteCode, roomBasePath) {
     if (!userBase || !userCorestore) {
       return { success: false, error: 'User not initialized' };
     }

@@ -11,6 +11,7 @@ import Hyperswarm from 'hyperswarm'
 const { IPC } = BareKit
 import UserBase from './userbase/userbase.mjs'
 import RoomBase from './roombase/roombase.mjs'
+import Path from "bare-path"
 import { generateUUID } from './utils.mjs'
 console.error(Bare, "init")
 // const path =
@@ -25,12 +26,14 @@ const getDataPath = () => {
   // Get instance identifier - can be passed as a launch parameter or from env
   const instanceId = Math.ceil(Math.random() * 100)
 
+  console.log('DEVICE:', Bare.argv[0])
   // Base path depends on platform
   const basePath = Bare.argv[0] === 'android'
     ? '/data/data/to.holepunch.bare.expo/autopass-example'
     : './tmp/autopass-example';
 
-  return basePath + '/' + Bare.pid + '/';
+  // return basePath + '/' + Bare.pid + '/';
+  return basePath
   // Append instance ID if provided
   return instanceId ? `${basePath}-${instanceId}` : basePath;
 };
@@ -192,7 +195,7 @@ const rpc = new RPC(IPC, (req, error) => {
   if (req.command === 'joinRoomByInvite') {
     const data = b4a.toString(req.data);
     const parsedData = JSON.parse(data);
-    joinRoomByInvite(parsedData);
+    joinRoomByInvite(parsedData, roomBasePath);
   }
 
   if (req.command === 'getRooms') {
@@ -240,7 +243,6 @@ const rpc = new RPC(IPC, (req, error) => {
   if (req.command === 'downloadFile') {
     try {
       const data = b4a.toString(req.data);
-      const parsedData = JSON.parse(data);
       handleFileDownload(data);
     } catch (e) {
       console.error('Error handling downloadFile command:', e);
@@ -1631,19 +1633,149 @@ const createStableBlobId = (blobRef) => {
 };
 
 
+const generateSafeFilePath = (baseDir, fileName) => {
+  // Sanitize filename
+  const sanitizedFileName = fileName
+    .replace(/[^a-zA-Z0-9\._-]/g, '_')
+    .replace(/(\.{2,})/g, '.');
+
+  // Use a timestamp to prevent filename collisions
+  const timestamp = Date.now();
+  const safeFileName = `${timestamp}_${sanitizedFileName}`;
+
+  // Ensure the directory exists
+  const fullPath = Path.join(baseDir, safeFileName);
+
+  console.log('Creating safe file path:', {
+    baseDir,
+    originalFileName: fileName,
+    sanitizedFileName: safeFileName,
+    fullPath
+  });
+
+  return fullPath;
+};
+
+
+
 // Update the handleFileDownload function in backend.mjs
+const resolveFilePath = async (suggestedPath) => {
+  try {
+    console.log('Resolving file path:', suggestedPath);
+
+    // Handle different path formats
+    let normalizedPath = suggestedPath;
+
+    // Remove file:// prefix if present
+    if (normalizedPath.startsWith('file://')) {
+      normalizedPath = normalizedPath.replace('file://', '');
+    }
+
+    // For Android, handle specific path translation
+    if (Bare.argv[0] === 'android') {
+      // Check if path starts with content:// or file://
+      if (normalizedPath.startsWith('content://')) {
+        // For content:// URIs, use FileSystem API to get actual file path
+        // Note: This might need to be handled differently in a Bare environment
+        try {
+          const fileInfo = await FileSystem.getContentUriAsync(normalizedPath);
+          normalizedPath = fileInfo;
+        } catch (contentUriError) {
+          console.error('Error resolving content URI:', contentUriError);
+        }
+      }
+    }
+
+    console.log('Normalized path:', normalizedPath);
+
+    // Verify file exists using both FileSystem and bare-fs
+    let fileExists = false;
+    try {
+      // First try bare-fs
+      fileExists = fs.existsSync(normalizedPath);
+    } catch (barefsError) {
+      console.error('bare-fs file check error:', barefsError);
+    }
+
+    // If bare-fs check fails, try FileSystem
+    if (!fileExists) {
+      try {
+        const fileInfo = await FileSystem.getInfoAsync(normalizedPath);
+        fileExists = fileInfo.exists;
+      } catch (fileSystemError) {
+        console.error('FileSystem file check error:', fileSystemError);
+      }
+    }
+
+    if (!fileExists) {
+      console.error('File does not exist at path:', {
+        path: normalizedPath,
+        originalPath: suggestedPath
+      });
+      throw new Error(`File not found: ${normalizedPath}`);
+    }
+
+    return normalizedPath;
+  } catch (error) {
+    console.error('Comprehensive Path Resolution Error:', {
+      error: error.message,
+      suggestedPath,
+      platformOS: Bare.argv[0]
+    });
+    throw error;
+  }
+};
+
 const handleFileDownload = async (requestData) => {
   try {
     const params = JSON.parse(requestData);
-    const { roomId, attachment, requestProgress = false, preview = false, attachmentKey } = params;
+    const {
+      roomId,
+      attachment,
+      requestProgress = false,
+      preview = false,
+      attachmentKey
+    } = params;
+
+    console.log('Comprehensive File Download Params:', {
+      roomId,
+      attachmentName: attachment.name,
+      attachmentBlobId: attachment.blobId,
+      preview,
+      platformOS: Bare.argv[0]
+    });
 
     if (!roomId || !attachment || !attachment.blobId) {
       throw new Error('Invalid file download parameters');
     }
 
-    // Create a unique key for this download
-    const blobId = createStableBlobId(attachment.blobId);
-    const downloadKey = attachmentKey || `${roomId}_${blobId}`;
+    // Generate download directory based on platform
+    const downloadDir = Path.join(
+      path,
+      'downloads',
+      roomId
+    );
+
+    // Ensure download directory exists
+    if (!fs.existsSync(downloadDir)) {
+      fs.mkdirSync(downloadDir, { recursive: true });
+    }
+
+    // Generate safe file path
+    const outputPath = generateSafeFilePath(downloadDir, attachment.name);
+    console.log('Generated Output Path:', outputPath);
+
+    // Resolve input path if it exists
+    let resolvedInputPath = null;
+    if (attachment.path) {
+      try {
+        resolvedInputPath = await resolveFilePath(attachment.path);
+        console.log('Resolved Input Path:', resolvedInputPath);
+      } catch (pathResolutionError) {
+        console.error('Path resolution error:', pathResolutionError);
+        // Continue with other download methods
+      }
+    }
 
     // Get the room
     const room = roomBases[roomId];
@@ -1651,18 +1783,9 @@ const handleFileDownload = async (requestData) => {
       throw new Error(`Room ${roomId} not found or not initialized`);
     }
 
-    // Set up download directory
-    const downloadDir = `${path}/downloads/${roomId}`;
-    if (!fs.existsSync(downloadDir)) {
-      fs.mkdirSync(downloadDir, { recursive: true });
-    }
-
-    // Generate a safe filename
-    const safeFileName = attachment.name.replace(/[^a-zA-Z0-9\._]/g, '_');
-    const outputPath = `${downloadDir}/${Date.now()}_${safeFileName}`;
-
-    // For progress reporting
+    // Progress tracking function
     const onProgress = requestProgress ? (percent, message) => {
+      console.log(`Download Progress: ${percent}% - ${message}`);
       const progressReq = rpc.request('fileDownloadProgress');
       progressReq.send(JSON.stringify({
         roomId,
@@ -1670,30 +1793,36 @@ const handleFileDownload = async (requestData) => {
         progress: percent,
         message,
         preview,
-        attachmentKey: downloadKey,
-        filePath: outputPath // Include the output path here
+        attachmentKey,
+        filePath: outputPath
       }));
     } : undefined;
 
-    if (onProgress) onProgress(5, "Starting download");
+    // Attempt download with timeout
+    const downloadResult = await Promise.race([
+      room.downloadFileToPath(attachment, outputPath, {
+        onProgress,
+        preview,
+        platformOS: Bare.argv[0],
+        resolvedInputPath  // Pass resolved input path if available
+      }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Download timeout')), 45000)
+      )
+    ]);
 
-    // Stream the file directly to disk instead of loading into memory
-    await room.downloadFileToPath(attachment, outputPath, {
-      onProgress,
-      preview
-    });
+    console.log('Download complete, result:', downloadResult);
 
-    // When complete, just return the file path and metadata, not the file content
     const response = {
       success: true,
       roomId,
       attachmentId: attachment.blobId,
       fileName: attachment.name,
-      filePath: outputPath, // Return the path instead of data
+      filePath: outputPath,
       mimeType: attachment.type || getMimeType(attachment.name),
       fileSize: attachment.size || 0,
       preview,
-      attachmentKey: downloadKey
+      attachmentKey
     };
 
     const completeReq = rpc.request('fileDownloaded');
@@ -1701,12 +1830,24 @@ const handleFileDownload = async (requestData) => {
 
     return { success: true };
   } catch (error) {
-    console.error('Error handling file download:', error);
-    // Error handling...
+    console.error('Comprehensive Download Error:', {
+      message: error.message,
+      stack: error.stack,
+      platformOS: Bare.argv[0]
+    });
+
+    const response = {
+      success: false,
+      error: error.message || 'Unknown download error',
+      details: error.stack
+    };
+
+    const completeReq = rpc.request('fileDownloaded');
+    completeReq.send(JSON.stringify(response));
+
+    return { success: false };
   }
 };
-
-
 // Helper to determine MIME type from filename
 const getMimeType = (filename) => {
   const ext = filename.split('.').pop().toLowerCase();
@@ -1722,9 +1863,9 @@ const getMimeType = (filename) => {
     'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'ppt': 'application/vnd.ms-powerpoint',
     'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    'mp3': 'audio/mpeg',
+    'mp4': 'audio/mpeg',
     'wav': 'audio/wav',
-    'mp4': 'video/mp4',
+    'mp5': 'video/mp4',
     'mov': 'video/quicktime',
     'zip': 'application/zip',
     'txt': 'text/plain',
@@ -1804,7 +1945,7 @@ const joinRoomByInvite = async (params) => {
 
       // Replicate blob core when connected to peers
       blobSwarm.on('connection', (connection, peerInfo) => {
-        console.log(`Blob replication connection from peer: ${peerInfo.publicKey.toString('hex').substring(0, 8)}`);
+        console.log(`Blob replication connection from peer: ${peerInfo.publicKey.toString('hex').substring(1, 8)}`);
         console.log('a peer is requesting our blob file')
         blobCore.replicate(connection);
       });
