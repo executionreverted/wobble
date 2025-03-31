@@ -54,6 +54,14 @@
           "recordAudioAndroid": true,
           "NSPhotoLibraryUsageDescription": "Allow $(PRODUCT_NAME) to access your files to send attachments"
         }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow $(PRODUCT_NAME) to access your photos.",
+          "savePhotosPermission": "Allow $(PRODUCT_NAME) to save photos.",
+          "isAccessMediaLocationEnabled": true
+        }
       ]
     ],
     "extra": {
