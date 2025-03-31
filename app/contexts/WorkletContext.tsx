@@ -112,6 +112,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
   }>({});
   const [cacheSize, setCacheSize] = useState(0);
 
+
+
   const initializeCache = useCallback(async () => {
     try {
       console.log('Initialize CacheStorage')
@@ -159,6 +161,108 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     }
   }, []);
 
+
+  const reconcileCacheMetadata = useCallback(async () => {
+    try {
+      const metadataString = await AsyncStorage.getItem(CACHE_METADATA_KEY);
+      if (metadataString) {
+        const metadata = JSON.parse(metadataString);
+
+        // Validate and clean up metadata
+        const validMetadata = {};
+        let totalValidSize = 0;
+
+        for (const [key, value] of Object.entries(metadata)) {
+          // Comprehensive null/undefined checks
+          if (!value || !value.filePath) {
+            console.log(`Removing invalid cache entry: ${key} - missing file path`);
+            continue;
+          }
+
+          try {
+            // Additional null check and trim
+            const cleanFilePath = (value.filePath || '').trim();
+            if (!cleanFilePath) {
+              console.log(`Skipping entry with empty file path: ${key}`);
+              continue;
+            }
+
+            // Ensure file path is a valid string
+            const fileInfo = await FileSystem.getInfoAsync(cleanFilePath);
+
+            if (fileInfo.exists && fileInfo.size > 0) {
+              validMetadata[key] = {
+                ...value,
+                filePath: cleanFilePath, // Ensure clean path
+                size: fileInfo.size
+              };
+              totalValidSize += fileInfo.size;
+            } else {
+              console.log(`Removing non-existent or empty file: ${cleanFilePath}`);
+            }
+          } catch (fileCheckError) {
+            console.error(`Error checking file for ${key}:`, {
+              filePath: value.filePath,
+              error: fileCheckError
+            });
+            // Optionally log the full error details
+            console.log('Full error details:', JSON.stringify(fileCheckError, null, 2));
+          }
+        }
+
+        // Only update if we have valid metadata
+        if (Object.keys(validMetadata).length > 0) {
+          setCacheMetadata(validMetadata);
+          setCacheSize(totalValidSize);
+
+          await AsyncStorage.setItem(CACHE_METADATA_KEY, JSON.stringify(validMetadata));
+
+          console.log('Cache reconciliation complete', {
+            totalValidEntries: Object.keys(validMetadata).length,
+            totalSize: totalValidSize
+          });
+        } else {
+          // If no valid entries, completely clear the cache
+          await AsyncStorage.removeItem(CACHE_METADATA_KEY);
+          setCacheMetadata({});
+          setCacheSize(0);
+
+          console.log('No valid cache entries found. Cache cleared.');
+        }
+      }
+    } catch (error) {
+      console.error('Comprehensive error in reconcileCacheMetadata:', {
+        errorMessage: error.message,
+        errorStack: error.stack
+      });
+
+      // Fallback: completely reset cache if reconciliation fails
+      try {
+        await AsyncStorage.removeItem(CACHE_METADATA_KEY);
+        setCacheMetadata({});
+        setCacheSize(0);
+
+        console.log('Cache reset due to reconciliation failure');
+      } catch (resetError) {
+        console.error('Error during cache reset:', resetError);
+      }
+    }
+  }, []);
+
+  // Call this method occasionally or on app startup
+  useEffect(() => {
+    reconcileCacheMetadata();
+  }, []);
+
+
+
+
+
+
+
+
+
+
   const addToCache = useCallback(async (cacheKey, fileData, fileName, mimeType, fileSize) => {
     try {
       // Create a unique filename to prevent collisions
@@ -178,30 +282,34 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
         actualSize = fileInfo.size || fileData.length * 0.75; // Approximation for base64
       }
 
+      setCacheMetadata(prevMetadata => {
+        const newMetadata = {
+          ...prevMetadata,
+          [cacheKey]: {
+            fileName,
+            filePath,
+            size: actualSize,
+            timestamp,
+            mimeType
+          },
 
-      // Update cache metadata
-      const newMetadata = {
-        ...cacheMetadata,
-        [cacheKey]: {
-          fileName,
-          filePath,
-          size: actualSize,
-          timestamp,
-          mimeType
-        },
-        length: (cacheMetadata.length || 0) + 1
-      };
+          length: (prevMetadata.length || 0) + 1
+        };
+        console.log('UPDATEEEE', newMetadata)
+        saveCacheMetadata(newMetadata);
+        return newMetadata;
+      });
 
+      setCacheSize(prev => {
+        const newSize = prev + actualSize;
 
-      console.log('UPDATEEEE', newMetadata)
-      setCacheMetadata(newMetadata);
-      setCacheSize(prev => prev + actualSize);
-      await saveCacheMetadata(newMetadata);
+        // Check cache size and clean if necessary
+        if (newSize > CACHE_MAX_SIZE) {
+          cleanCache();
+        }
 
-      // Check if we need to clean up cache
-      if (cacheSize + actualSize > CACHE_MAX_SIZE) {
-        cleanCache();
-      }
+        return newSize;
+      });
 
       return filePath;
     } catch (error) {
@@ -212,29 +320,78 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
 
 
   const getFromCache = useCallback(async (cacheKey) => {
-    if (!isCacheInitialized && cacheInitPromise.current) {
-      await cacheInitPromise.current;
-    }
     try {
       const cachedItem = cacheMetadata[cacheKey];
-      if (!cachedItem) return null;
 
-      // Check if file exists
-      const fileInfo = await FileSystem.getInfoAsync(cachedItem.filePath);
-      if (!fileInfo.exists) {
-        // File was deleted, remove from metadata
-        const newMetadata = { ...cacheMetadata };
-        delete newMetadata[cacheKey];
-        setCacheMetadata(newMetadata);
-        setCacheSize(prev => prev - (cachedItem.size || 0));
-        await saveCacheMetadata(newMetadata);
+      // If no cached item found, return null
+      if (!cachedItem) {
+        console.log(`No cache entry found for key: ${cacheKey}`);
         return null;
       }
 
-      // Read file from cache
-      const fileData = await FileSystem.readAsStringAsync(cachedItem.filePath, {
-        encoding: FileSystem.EncodingType.Base64
-      });
+      // Validate cached item
+      if (!cachedItem.filePath) {
+        console.warn(`Invalid cache entry for key ${cacheKey}: Missing file path`);
+
+        // Remove invalid entry from metadata
+        const newMetadata = { ...cacheMetadata };
+        delete newMetadata[cacheKey];
+
+        setCacheMetadata(newMetadata);
+        await saveCacheMetadata(newMetadata);
+
+        return null;
+      }
+
+      // Check file existence and integrity
+      let fileInfo;
+      try {
+        fileInfo = await FileSystem.getInfoAsync(cachedItem.filePath);
+      } catch (fileCheckError) {
+        console.error(`Error checking file for ${cacheKey}:`, fileCheckError);
+        fileInfo = { exists: false };
+      }
+
+      // If file doesn't exist, clean up the metadata
+      if (!fileInfo.exists) {
+        console.log(`Cached file not found for key ${cacheKey}. Removing from cache.`);
+
+        const newMetadata = { ...cacheMetadata };
+        const removedItemSize = cachedItem.size || 0;
+
+        delete newMetadata[cacheKey];
+
+        // Update metadata and cache size
+        setCacheMetadata(newMetadata);
+        setCacheSize(prev => Math.max(0, prev - removedItemSize));
+
+        await saveCacheMetadata(newMetadata);
+
+        return null;
+      }
+
+      // Validate file size
+      if (fileInfo.size === 0) {
+        console.warn(`Empty file in cache for key ${cacheKey}`);
+        return null;
+      }
+
+      // Read file content
+      let fileData;
+      try {
+        fileData = await FileSystem.readAsStringAsync(cachedItem.filePath, {
+          encoding: FileSystem.EncodingType.Base64
+        });
+      } catch (readError) {
+        console.error(`Error reading cached file for ${cacheKey}:`, readError);
+        return null;
+      }
+
+      // Validate file data
+      if (!fileData) {
+        console.warn(`Unable to read file data for ${cacheKey}`);
+        return null;
+      }
 
       // Update timestamp to mark as recently used
       const newMetadata = {
@@ -244,20 +401,36 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
           timestamp: Date.now()
         }
       };
+
       setCacheMetadata(newMetadata);
       await saveCacheMetadata(newMetadata);
 
       return {
         data: fileData,
-        mimeType: cachedItem.mimeType,
-        fileName: cachedItem.fileName,
+        mimeType: cachedItem.mimeType || 'application/octet-stream',
+        fileName: cachedItem.fileName || 'unknown_file',
         path: cachedItem.filePath
       };
     } catch (error) {
-      console.error('Error retrieving file from cache:', error);
+      console.error('Comprehensive error in getFromCache:', error);
+
+      // Attempt to remove problematic cache entry if possible
+      try {
+        const newMetadata = { ...cacheMetadata };
+        delete newMetadata[cacheKey];
+        setCacheMetadata(newMetadata);
+        await saveCacheMetadata(newMetadata);
+      } catch (cleanupError) {
+        console.error('Error during cache cleanup:', cleanupError);
+      }
+
       return null;
     }
   }, [cacheMetadata, saveCacheMetadata]);
+
+
+
+
 
   const cleanCache = useCallback(async () => {
     try {
