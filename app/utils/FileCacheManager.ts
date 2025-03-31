@@ -460,6 +460,77 @@ export class FileCacheManager {
     };
   }
 
+  async fileExists(key: string): Promise<boolean> {
+    await this.initialize();
+
+    // Check if entry exists in metadata
+    const entry = this.cacheMetadata[key];
+    if (!entry) return false;
+
+    try {
+      // Verify file actually exists on disk
+      const fileInfo = await FileSystem.getInfoAsync(entry.filePath);
+      return fileInfo.exists && fileInfo.size > 0;
+    } catch (error) {
+      console.error(`Error checking file existence for ${key}:`, error);
+      return false;
+    }
+  }
+
+  async getMetadata(key: string): Promise<{
+    fileName: string;
+    filePath: string;
+    mimeType: string;
+    isPreview: boolean;
+    size: number;
+  } | null> {
+    await this.initialize();
+
+    const entry = this.cacheMetadata[key];
+    if (!entry) return null;
+
+    try {
+      // Check if file exists
+      const fileInfo = await FileSystem.getInfoAsync(entry.filePath);
+      if (!fileInfo.exists || fileInfo.size === 0) {
+        // Remove invalid entry
+        delete this.cacheMetadata[key];
+        this.cacheSize -= entry.size;
+        await this.saveMetadata();
+        return null;
+      }
+
+      // Return metadata without loading file content
+      return {
+        fileName: entry.fileName,
+        filePath: entry.filePath,
+        mimeType: entry.mimeType,
+        isPreview: entry.isPreview,
+        size: fileInfo.size
+      };
+    } catch (error) {
+      console.error(`Error getting metadata for ${key}:`, error);
+      return null;
+    }
+  }
+
+  async getFileData(key: string): Promise<string | null> {
+    await this.initialize();
+
+    const entry = this.cacheMetadata[key];
+    if (!entry) return null;
+
+    try {
+      // Read file data
+      return await FileSystem.readAsStringAsync(entry.filePath, {
+        encoding: FileSystem.EncodingType.Base64
+      });
+    } catch (error) {
+      console.error(`Error reading file data for ${key}:`, error);
+      return null;
+    }
+  }
+
   // Determine if a file is an image
   static isImageFile(fileName: string): boolean {
     const ext = fileName?.split('.')?.pop()?.toLowerCase() || '';

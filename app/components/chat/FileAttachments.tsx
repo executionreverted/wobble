@@ -1,10 +1,13 @@
+// app/components/chat/FileAttachments.tsx
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform, Image } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { COLORS } from '../../utils/constants';
 import useWorklet from '../../hooks/useWorklet';
 import fileCacheManager, { FileCacheManager } from '../../utils/FileCacheManager';
-// Updated File Attachment Component
+import useCachedFile from '../../hooks/useCachedFile';
+
+// File Attachment Component
 export const EnhancedFileAttachment = ({
   handleAttachmentPress,
   attachment,
@@ -14,71 +17,55 @@ export const EnhancedFileAttachment = ({
   roomId: string;
   handleAttachmentPress?: (attachment: any) => void;
 }) => {
-  const { fileDownloads, downloadFile, saveFileToDevice } = useWorklet();
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [isDownloadComplete, setIsDownloadComplete] = useState(false);
+  const { saveFileToDevice } = useWorklet();
 
-  // Create a unique key for this attachment
-  const attachmentKey = FileCacheManager.createCacheKey(roomId, attachment.blobId);
-
-  // Get download status for this attachment using the unique key
-  const downloadStatus = fileDownloads[attachmentKey];
+  // Use the cached file hook
+  const {
+    attachmentKey,
+    downloadStatus,
+    isDownloading,
+    isCached,
+    handleDownload
+  } = useCachedFile(roomId, attachment);
 
   // Detect if file is large
   const isLargeFile = (attachment.size || 0) > 10 * 1024 * 1024; // 10MB threshold
 
-  useEffect(() => {
-    if (downloadStatus) {
-      // Update downloading state
-      setIsDownloading(downloadStatus.progress > 1 && downloadStatus.progress < 100);
+  // Determine if download is complete
+  const isDownloadComplete = downloadStatus?.progress >= 100 || isCached;
 
-      // Immediately set download complete when progress reaches 100
-      if (downloadStatus.progress >= 100) {
-        setIsDownloadComplete(true);
-      } else {
-        setIsDownloadComplete(false);
-      }
-    } else {
-      setIsDownloading(false);
-      setIsDownloadComplete(false);
-    }
-  }, [downloadStatus]);
-
-  const handleDownload = async () => {
+  const handleDownloadOrOpen = async () => {
     if (isDownloading) return;
 
-    if (!roomId || !attachment || !attachment.blobId) {
-      Alert.alert('Error', 'Invalid attachment data');
-      return;
+    if (isDownloadComplete) {
+      // If already downloaded, open or save it
+      handleSaveFile();
+    } else {
+      // Ask for confirmation before downloading large files
+      if (isLargeFile) {
+        Alert.alert(
+          'Download Large File',
+          `This is a large file (${formatFileSize(attachment.size || 0)}). Download may take some time.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Download',
+              onPress: () => handleDownload(false)
+            }
+          ]
+        );
+      } else {
+        // Start download for smaller files
+        handleDownload(false);
+      }
     }
-
-    // Customize alert for large files
-    const confirmationMessage = isLargeFile
-      ? `This is a large file (${formatFileSize(attachment.size || 0)}). Download may take some time.`
-      : `Do you want to download "${attachment.name}"?`;
-
-    Alert.alert(
-      'Download File',
-      confirmationMessage,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Download',
-          onPress: async () => {
-            setIsDownloading(true);
-            await downloadFile(roomId, attachment, false, attachmentKey);
-          }
-        }
-      ]
-    );
   };
 
   const handleSaveFile = async () => {
-    if (!isDownloadComplete || !downloadStatus?.data) return;
+    if (!isDownloadComplete || !attachmentKey) return;
 
     try {
       const success = await saveFileToDevice(attachmentKey);
-
       if (success) {
         Alert.alert('Success', 'File saved to device');
       } else {
@@ -90,7 +77,7 @@ export const EnhancedFileAttachment = ({
     }
   };
 
-  // Format file size with more robust handling
+  // Format file size
   const formatFileSize = (bytes: number) => {
     if (!bytes || bytes < 0) return '0 B';
     if (bytes < 1024) return `${bytes} B`;
@@ -116,7 +103,7 @@ export const EnhancedFileAttachment = ({
   return (
     <TouchableOpacity
       style={styles.attachmentContainer}
-      onPress={isDownloadComplete ? handleSaveFile : handleDownload}
+      onPress={handleDownloadOrOpen}
       disabled={isDownloading}
     >
       <View style={styles.attachmentIconContainer}>
@@ -127,21 +114,19 @@ export const EnhancedFileAttachment = ({
         />
       </View>
       <View style={styles.attachmentDetails}>
-        <TouchableOpacity>
-          <Text
-            onPress={handleAttachmentPress}
-            style={styles.attachmentName}
-            numberOfLines={2}
-          >
-            {attachment.name}
-          </Text>
-        </TouchableOpacity>
+        <Text
+          style={styles.attachmentName}
+          numberOfLines={2}
+          onPress={() => handleAttachmentPress && handleAttachmentPress(attachment)}
+        >
+          {attachment.name}
+        </Text>
         <Text style={styles.attachmentSize}>
           {formatFileSize(attachment.size || 1)}
           {isLargeFile && <Text style={{ color: COLORS.warning }}> (Large File)</Text>}
         </Text>
 
-        {downloadStatus && downloadStatus.progress > 1 && downloadStatus.progress < 100 && (
+        {isDownloading && downloadStatus && (
           <View style={styles.progressContainer}>
             <View style={styles.progressBar}>
               <View
@@ -168,7 +153,7 @@ export const EnhancedFileAttachment = ({
   );
 };
 
-// Updated Image Attachment Component
+// Image Attachment Component
 export const EnhancedImageAttachment = ({
   handleAttachmentPress,
   attachment,
@@ -178,55 +163,83 @@ export const EnhancedImageAttachment = ({
   roomId: string;
   handleAttachmentPress?: (attachment: any) => void;
 }) => {
-  const { fileDownloads, downloadFile, saveFileToDevice } = useWorklet();
-  const [isDownloading, setIsDownloading] = useState(false);
+  const { saveFileToDevice } = useWorklet();
   const [localPreviewUri, setLocalPreviewUri] = useState<string | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [autoDownloadInitiated, setAutoDownloadInitiated] = useState(false);
 
-  // Create a unique key for this attachment
-  const attachmentKey = FileCacheManager.createCacheKey(roomId, attachment.blobId);
+  // Use the cached file hook
+  const {
+    attachmentKey,
+    downloadStatus,
+    isDownloading,
+    isCached,
+    handleDownload
+  } = useCachedFile(roomId, attachment);
 
-  // Get download status for this attachment
-  const downloadStatus = fileDownloads[attachmentKey];
+  // Determine if download is complete
+  const isDownloadComplete = downloadStatus?.progress >= 100 || isCached;
 
-  // Determine if we have a preview or full data
-  const hasPreview = Boolean(downloadStatus?.data);
-  const hasFullData = Boolean(downloadStatus?.data && !downloadStatus?.preview);
+  // Check if we have a path to the file but haven't loaded the data yet
+  const hasPath = downloadStatus?.path;
+  const needsDataLoading = hasPath && !localPreviewUri && !isLoadingPreview;
 
-  // Update local URI when download status changes
+  // Convert data to URI format for display
   useEffect(() => {
     if (downloadStatus?.data) {
-      // Create a proper data URI with the correct mime type
+      // Convert data directly to URI
       const mimeType = downloadStatus.mimeType || getMimeTypeFromFilename(attachment.name) || 'image/jpeg';
       const dataUri = `data:${mimeType};base64,${downloadStatus.data}`;
       setLocalPreviewUri(dataUri);
-    } else {
-      setLocalPreviewUri(null);
     }
-  }, [downloadStatus?.data, downloadStatus?.timestamp, attachment.name]);
+  }, [downloadStatus?.data, attachment.name]);
 
-  // Update downloading state based on progress
+  // Load image data lazily when needed
   useEffect(() => {
-    if (downloadStatus) {
-      setIsDownloading(downloadStatus.progress > 1 && downloadStatus.progress < 100);
-    } else {
-      setIsDownloading(false);
-    }
-  }, [downloadStatus]);
+    const loadImageData = async () => {
+      if (!needsDataLoading || !attachmentKey) return;
 
-  // Auto-download preview only once when component mounts
+      setIsLoadingPreview(true);
+      try {
+        console.log(`Lazy loading image data for ${attachment.name}`);
+
+        // Load file data on demand
+        const fileData = await fileCacheManager.getFileData(attachmentKey);
+
+        if (fileData) {
+          // Create a data URI
+          const mimeType = downloadStatus?.mimeType || getMimeTypeFromFilename(attachment.name) || 'image/jpeg';
+          const dataUri = `data:${mimeType};base64,${fileData}`;
+          setLocalPreviewUri(dataUri);
+        }
+      } catch (error) {
+        console.error('Error lazy loading image:', error);
+      } finally {
+        setIsLoadingPreview(false);
+      }
+    };
+
+    loadImageData();
+  }, [needsDataLoading, attachmentKey, attachment.name, downloadStatus?.mimeType]);
+
+  // Auto-download image previews once
   useEffect(() => {
-    const shouldAutoDownload =
-      !autoDownloadInitiated &&
-      !isDownloading &&
-      !hasPreview &&
-      FileCacheManager.isImageFile(attachment.name);
+    const checkAndAutoDownload = async () => {
+      if (autoDownloadInitiated || isDownloading || localPreviewUri || !FileCacheManager.isImageFile(attachment.name)) {
+        return;
+      }
 
-    if (shouldAutoDownload) {
       setAutoDownloadInitiated(true);
-      downloadPreview();
-    }
-  }, [autoDownloadInitiated, hasPreview, attachment.name, isDownloading]);
+
+      // If not cached or downloading, start preview download
+      if (!isCached && !isDownloading) {
+        console.log(`Auto-downloading preview for ${attachment.name}`);
+        handleDownload(true); // true = preview
+      }
+    };
+
+    checkAndAutoDownload();
+  }, [autoDownloadInitiated, isDownloading, localPreviewUri, isCached, attachment.name, handleDownload]);
 
   // Determine MIME type from filename
   const getMimeTypeFromFilename = (filename: string) => {
@@ -243,67 +256,49 @@ export const EnhancedImageAttachment = ({
     return ext ? mimeTypes[ext] : null;
   };
 
-  const downloadPreview = async () => {
-    if (!roomId || !attachment || !attachment.blobId) return;
+  const handleImagePress = () => {
+    if (isDownloading || isLoadingPreview) return;
 
-    setIsDownloading(true);
-    await downloadFile(roomId, attachment, true, attachmentKey);
-  };
-
-  const handleFullDownload = async () => {
-    if (!roomId || !attachment || !attachment.blobId) {
-      Alert.alert('Error', 'Invalid attachment data');
-      return;
-    }
-
-    if (hasPreview && !hasFullData) {
-      Alert.alert(
-        'Download Full Image',
-        `Do you want to download the full-quality version of "${attachment.name}"?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Download',
-            onPress: async () => {
-              setIsDownloading(true);
-              await downloadFile(roomId, attachment, false, attachmentKey);
-            }
-          }
-        ]
-      );
-    } else if (!hasPreview) {
-      // If no preview yet, download preview first
-      downloadPreview();
-    } else {
-      // If full data already available, save to device
+    if (isDownloadComplete || localPreviewUri) {
+      // We have the image, open/save it
       handleSaveToDevice();
+    } else {
+      // Start downloading
+      handleDownload(false); // false = full quality
     }
   };
 
   const handleSaveToDevice = async () => {
-    if (!downloadStatus?.data) return;
+    if ((!downloadStatus?.data && !downloadStatus?.path) || !attachmentKey) return;
 
     try {
-      const success = await fileCacheManager.openFile(
-        downloadStatus.path,
-        downloadStatus.mimeType || 'application/octet-stream'
-      );
-      if (success) {
-        Alert.alert('Success', 'Image saved to device');
+      let success = false;
+
+      if (downloadStatus.path) {
+        success = await fileCacheManager.openFile(
+          downloadStatus.path,
+          downloadStatus.mimeType || 'image/jpeg'
+        );
       } else {
-        Alert.alert('Error', 'Failed to save image to device');
+        success = await saveFileToDevice(attachmentKey);
+      }
+
+      if (success) {
+        Alert.alert('Success', 'Image opened/saved successfully');
+      } else {
+        Alert.alert('Error', 'Failed to open/save image');
       }
     } catch (error) {
-      console.error('Error saving image to device:', error);
-      Alert.alert('Error', 'An error occurred while saving the image');
+      console.error('Error handling image:', error);
+      Alert.alert('Error', 'An error occurred');
     }
   };
 
   return (
     <TouchableOpacity
       style={styles.imageAttachmentContainer}
-      onPress={hasFullData ? handleSaveToDevice : handleFullDownload}
-      disabled={isDownloading}
+      onPress={handleImagePress}
+      disabled={isDownloading || isLoadingPreview}
     >
       <View style={styles.imageAttachmentPlaceholder}>
         {localPreviewUri ? (
@@ -311,44 +306,37 @@ export const EnhancedImageAttachment = ({
             source={{ uri: localPreviewUri }}
             style={styles.imagePreview}
             resizeMode="contain"
-            // Add a key with timestamp to force re-render when image changes
-            key={`preview-${attachmentKey}-${downloadStatus?.timestamp || Date.now()}`}
           />
         ) : (
           <>
             <MaterialIcons name="image" size={49} color={COLORS.primary} />
-            <TouchableOpacity onPress={hasFullData ? handleSaveToDevice : () => handleAttachmentPress && handleAttachmentPress(attachment)}>
-              <Text style={styles.attachmentName} numberOfLines={2}>{attachment.name}</Text>
-            </TouchableOpacity>
+            <Text
+              style={styles.attachmentName}
+              numberOfLines={2}
+              onPress={() => handleAttachmentPress && handleAttachmentPress(attachment)}
+            >
+              {attachment.name}
+            </Text>
           </>
         )}
 
-        {isDownloading && (
+        {(isDownloading || isLoadingPreview) && (
           <View style={styles.imageProgressContainer}>
             <ActivityIndicator size="small" color={COLORS.primary} />
             <Text style={styles.progressText}>
-              {downloadStatus?.progress || 1}% - {downloadStatus?.message || 'Loading preview...'}
+              {isLoadingPreview ? 'Loading image...' : `${downloadStatus?.progress || 0}% - ${downloadStatus?.message || 'Downloading...'}`}
             </Text>
           </View>
         )}
 
-        {(hasPreview || hasFullData) && !isDownloading && (
+        {(isDownloadComplete || localPreviewUri) && !isDownloading && !isLoadingPreview && (
           <View style={styles.imageActionContainer}>
-            {hasFullData ? (
-              <TouchableOpacity
-                style={styles.imageAction}
-                onPress={handleSaveToDevice}
-              >
-                <MaterialIcons name="save-alt" size={25} color="#FFF" />
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={styles.imageAction}
-                onPress={handleFullDownload}
-              >
-                <MaterialIcons name="download" size={25} color="#FFF" />
-              </TouchableOpacity>
-            )}
+            <TouchableOpacity
+              style={styles.imageAction}
+              onPress={handleSaveToDevice}
+            >
+              <MaterialIcons name="save-alt" size={25} color="#FFF" />
+            </TouchableOpacity>
           </View>
         )}
       </View>

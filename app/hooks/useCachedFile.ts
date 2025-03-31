@@ -1,0 +1,105 @@
+// app/hooks/useCachedFile.ts
+
+import { useState, useEffect, useCallback } from 'react';
+import fileCacheManager, { FileCacheManager } from '../utils/FileCacheManager';
+import useWorklet from './useWorklet';
+
+/**
+ * Hook for efficiently working with cached files
+ */
+export const useCachedFile = (roomId: string, attachment: any) => {
+  const { fileDownloads, downloadFile } = useWorklet();
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [isCached, setIsCached] = useState(false);
+  const [isCheckingCache, setIsCheckingCache] = useState(false);
+
+  // Generate attachment key - this is the unique identifier for the file
+  const attachmentKey = attachment?.blobId
+    ? FileCacheManager.createCacheKey(roomId, attachment.blobId)
+    : null;
+
+  // Get download status from context
+  const downloadStatus = attachmentKey ? fileDownloads[attachmentKey] : null;
+
+  // Check if file is already downloaded in state
+  useEffect(() => {
+    if (downloadStatus) {
+      setIsDownloading(downloadStatus.progress > 0 && downloadStatus.progress < 100);
+
+      // If progress is 100%, it's fully downloaded
+      if (downloadStatus.progress >= 100) {
+        setIsCached(true);
+      }
+    } else {
+      setIsDownloading(false);
+    }
+  }, [downloadStatus]);
+
+  // Check cache on component mount - only if we don't already know it's cached
+  useEffect(() => {
+    const checkCache = async () => {
+      if (!attachmentKey || isCached || downloadStatus?.progress >= 100) {
+        return;
+      }
+
+      // Only check cache if we don't know the status yet
+      setIsCheckingCache(true);
+      try {
+        // Check if file exists in cache
+        const exists = await fileCacheManager.fileExists(attachmentKey);
+
+        if (exists) {
+          console.log(`File ${attachment.name} found in cache`);
+          setIsCached(true);
+
+          // Update the download state if needed without loading the data
+          if (!downloadStatus || downloadStatus.progress < 100) {
+            try {
+              const metadata = await fileCacheManager.getMetadata(attachmentKey);
+              if (metadata) {
+                downloadFile(roomId, attachment, metadata.isPreview, attachmentKey);
+              }
+            } catch (metadataError) {
+              console.error('Error getting file metadata:', metadataError);
+            }
+          }
+        } else {
+          setIsCached(false);
+        }
+      } catch (error) {
+        console.error('Error checking cache for file:', error);
+        setIsCached(false);
+      } finally {
+        setIsCheckingCache(false);
+      }
+    };
+
+    checkCache();
+  }, [attachmentKey, roomId, attachment, isCached, downloadStatus]);
+
+  // Function to handle downloads with cache awareness
+  const handleDownload = useCallback(async (preview = false) => {
+    if (!attachmentKey || isDownloading) return false;
+
+    // If already cached but not in download state, update the state
+    if (isCached) {
+      console.log(`File ${attachment.name} already cached, updating state`);
+      return await downloadFile(roomId, attachment, preview, attachmentKey);
+    }
+
+    // Start a new download
+    setIsDownloading(true);
+    return await downloadFile(roomId, attachment, preview, attachmentKey);
+  }, [attachmentKey, roomId, attachment, isDownloading, isCached, downloadFile]);
+
+  return {
+    attachmentKey,
+    downloadStatus,
+    isDownloading,
+    isCached,
+    isCheckingCache,
+    handleDownload
+  };
+};
+
+export default useCachedFile;

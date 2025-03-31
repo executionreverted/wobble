@@ -1101,7 +1101,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       attachmentKey
     } = data;
 
-    const downloadKey = attachmentKey || FileCacheManager.createCacheKey(roomId, attachmentId);
+    const downloadKey = FileCacheManager.createCacheKey(roomId, attachmentId);
 
     if (!downloadKey) {
       console.error('Missing attachment identifier');
@@ -1163,8 +1163,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     } = data;
 
     // Create a cache key if attachmentKey is not provided
-    const downloadKey = attachmentKey ||
-      (roomId && attachmentId ? FileCacheManager.createCacheKey(roomId, attachmentId) : undefined);
+    const downloadKey = (roomId && attachmentId ? FileCacheManager.createCacheKey(roomId, attachmentId) : undefined);
 
     if (!downloadKey) {
       console.warn('No download key available for progress update');
@@ -1242,59 +1241,79 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
   }, []);
 
 
-  const downloadFile = async (roomId: string, attachment: any, preview = false, attachmentKey?: string) => {
+  // Updated downloadFile method for WorkletContext
+
+  const downloadFile = async (roomId: string, attachment: any, preview = false, attachmentKey?: string): Promise<boolean> => {
     if (!rpcClient) return false;
 
     try {
       // Generate a unique key for this download if not provided
       const downloadKey = attachmentKey || FileCacheManager.createCacheKey(roomId, attachment.blobId);
 
-      // Initialize fileCacheManager if not done already
-      await fileCacheManager.initialize();
-
-      // For previews or regular downloads, check cache first
-      const cachedFile = await fileCacheManager.getFile(downloadKey);
-      if (cachedFile) {
-        console.log(`Loading ${attachment.name} from cache`);
-
-        // Update the download progress immediately to 100%
-        setFileDownloads(prev => ({
-          ...prev,
-          [downloadKey]: {
-            progress: 100,
-            message: 'Loaded from cache',
-            preview,
-            data: cachedFile.data,
-            mimeType: cachedFile.mimeType,
-            fileName: cachedFile.fileName,
-            path: cachedFile.path,
-            timestamp: Date.now(),
-            fromCache: true
-          }
-        }));
-
+      // Check existing status in fileDownloads state
+      const existingStatus = fileDownloads[downloadKey];
+      if (existingStatus && existingStatus.progress >= 100) {
+        console.log(`File ${attachment.name} already in state as downloaded`);
         return true;
       }
 
-      // Reset progress for this attachment using the unique key
-      setFileDownloads(prev => ({
-        ...prev,
-        [downloadKey]: {
-          progress: 0,
-          message: 'Preparing download...',
-          preview
-        }
-      }));
+      // Check if in cache but not in state
+      let loadFromCache = false;
 
-      // Include the attachmentKey in the request
-      const request = rpcClient.request('downloadFile');
-      await request.send(JSON.stringify({
-        roomId,
-        attachment,
-        requestProgress: true,
-        preview,
-        attachmentKey: downloadKey
-      }));
+      try {
+        const exists = await fileCacheManager.fileExists(downloadKey);
+        if (exists) {
+          loadFromCache = true;
+          console.log(`File ${attachment.name} found in cache, updating state`);
+
+          // Get metadata
+          const metadata = await fileCacheManager.getMetadata(downloadKey);
+          if (metadata) {
+            // Update fileDownloads state with cache metadata WITHOUT loading the content
+            setFileDownloads(prev => ({
+              ...prev,
+              [downloadKey]: {
+                progress: 100, // Mark as complete
+                message: 'Available from cache',
+                preview: metadata.isPreview,
+                fileName: metadata.fileName,
+                mimeType: metadata.mimeType,
+                path: metadata.filePath,
+                // Don't include the data until needed - saves memory
+                fromCache: true
+              }
+            }));
+
+            return true;
+          }
+        }
+      } catch (cacheError) {
+        console.error('Error checking cache:', cacheError);
+        // Continue with normal download if cache check fails
+      }
+
+      // If not in cache, start a new download
+      if (!loadFromCache) {
+        // Reset progress for this attachment using the unique key
+        setFileDownloads(prev => ({
+          ...prev,
+          [downloadKey]: {
+            progress: 0,
+            message: 'Preparing download...',
+            preview
+          }
+        }));
+
+        // Include the attachmentKey in the request
+        const request = rpcClient.request('downloadFile');
+        await request.send(JSON.stringify({
+          roomId,
+          attachment,
+          requestProgress: true,
+          preview,
+          attachmentKey: downloadKey
+        }));
+      }
 
       return true;
     } catch (err) {
@@ -1302,7 +1321,6 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       return false;
     }
   };
-
 
 
   const value = useMemo(() => (
@@ -1327,10 +1345,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       downloadFile,
       cacheSize,
       clearCache,
-      getCacheInfo: () => ({
-        size: cacheSize,
-        files: Object.keys(cacheMetadata).length
-      }),
+      getCacheInfo,
       isCacheInitialized,
       cacheInitPromise: cacheInitPromise.current,
       saveFileToDevice
