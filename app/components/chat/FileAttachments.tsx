@@ -1,62 +1,11 @@
-import React, { useRef, useCallback, useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform, Image } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { COLORS } from '../../utils/constants';
 import useWorklet from '../../hooks/useWorklet';
-import * as FileSystem from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
-import * as MediaLibrary from 'expo-media-library';
-import { createStableBlobId } from '@/app/utils/helpers';
+import { FileCacheManager } from '../../utils/FileCacheManager';
 
-// Determine if file is an image
-const isImageFile = (fileName: string) => {
-  const ext = fileName?.split('.')?.pop()?.toLowerCase() || '';
-  return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext);
-};
-
-// Get file icon based on extension
-const getFileIcon = (fileName: string) => {
-  const ext = fileName?.split('.')?.pop()?.toLowerCase() || '';
-  if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) return 'image';
-  if (['pdf'].includes(ext)) return 'picture-as-pdf';
-  if (['doc', 'docx'].includes(ext)) return 'description';
-  if (['xls', 'xlsx'].includes(ext)) return 'table-chart';
-  if (['ppt', 'pptx'].includes(ext)) return 'slideshow';
-  if (['zip', 'rar', '7z'].includes(ext)) return 'folder-zip';
-  if (['mp3', 'wav', 'ogg'].includes(ext)) return 'audiotrack';
-  if (['mp4', 'mov', 'avi'].includes(ext)) return 'videocam';
-  return 'insert-drive-file';
-};
-
-// Format file size with more robust handling
-const formatFileSize = (bytes: number) => {
-  if (!bytes || bytes < 0) return '0 B';
-  if (bytes < 1024) return `${bytes} B`;
-  else if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  else if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  else return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-};
-
-// Determine MIME type from filename
-const getMimeTypeFromFilename = (filename: string) => {
-  const ext = filename?.split('.')?.pop()?.toLowerCase();
-  const mimeTypes = {
-    'jpg': 'image/jpeg',
-    'jpeg': 'image/jpeg',
-    'png': 'image/png',
-    'gif': 'image/gif',
-    'webp': 'image/webp',
-    'bmp': 'image/bmp',
-    'svg': 'image/svg+xml'
-  };
-  return ext ? mimeTypes[ext] as any : null;
-};
-
-// Constants for large file handling
-const MAX_PREVIEW_SIZE = 5 * 1024 * 1024; // 5MB
-const LARGE_FILE_THRESHOLD = 10 * 1024 * 1024; // 10MB
-
-// File Attachment Component
+// Updated File Attachment Component
 export const EnhancedFileAttachment = ({
   handleAttachmentPress,
   attachment,
@@ -66,19 +15,18 @@ export const EnhancedFileAttachment = ({
   roomId: string;
   handleAttachmentPress?: (attachment: any) => void;
 }) => {
-  const { fileDownloads, downloadFile } = useWorklet();
+  const { fileDownloads, downloadFile, saveFileToDevice } = useWorklet();
   const [isDownloading, setIsDownloading] = useState(false);
-
   const [isDownloadComplete, setIsDownloadComplete] = useState(false);
+
   // Create a unique key for this attachment
-  const blobId = createStableBlobId(attachment.blobId);
-  const attachmentKey = `${roomId}_${blobId}`;
+  const attachmentKey = FileCacheManager.createCacheKey(roomId, attachment.blobId);
 
   // Get download status for this attachment using the unique key
   const downloadStatus = fileDownloads[attachmentKey];
 
   // Detect if file is large
-  const isLargeFile = (attachment.size || 0) > LARGE_FILE_THRESHOLD;
+  const isLargeFile = (attachment.size || 0) > 10 * 1024 * 1024; // 10MB threshold
 
   useEffect(() => {
     if (downloadStatus) {
@@ -86,7 +34,7 @@ export const EnhancedFileAttachment = ({
       setIsDownloading(downloadStatus.progress > 1 && downloadStatus.progress < 100);
 
       // Immediately set download complete when progress reaches 100
-      if (downloadStatus.progress === 100 || downloadStatus.progress === 101) {
+      if (downloadStatus.progress >= 100) {
         setIsDownloadComplete(true);
       } else {
         setIsDownloadComplete(false);
@@ -98,7 +46,8 @@ export const EnhancedFileAttachment = ({
   }, [downloadStatus]);
 
   const handleDownload = async () => {
-    if (isDownloading || isDownloadComplete) return
+    if (isDownloading) return;
+
     if (!roomId || !attachment || !attachment.blobId) {
       Alert.alert('Error', 'Invalid attachment data');
       return;
@@ -125,47 +74,57 @@ export const EnhancedFileAttachment = ({
     );
   };
 
-  // Consider download complete when progress reaches 101 (matching original code)
-  const isComplete = downloadStatus?.progress === 101 && downloadStatus?.data;
-
-  const handleShareFile = async () => {
-    if (!isComplete || !downloadStatus.data) return;
-
-    if (Platform.OS === 'web') {
-      Alert.alert('Cannot Share', 'File sharing is not available on web');
-      return;
-    }
+  const handleSaveFile = async () => {
+    if (!isDownloadComplete || !downloadStatus?.data) return;
 
     try {
-      // Save file to temp location
-      const fileUri = FileSystem.cacheDirectory + downloadStatus.fileName;
-      await FileSystem.writeAsStringAsync(fileUri, downloadStatus.data, {
-        encoding: FileSystem.EncodingType.Base64
-      });
+      const success = await saveFileToDevice(attachmentKey);
 
-      // Share the file
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri);
+      if (success) {
+        Alert.alert('Success', 'File saved to device');
       } else {
-        Alert.alert('Sharing not available', 'File sharing is not available on this device');
+        Alert.alert('Error', 'Failed to save file to device');
       }
     } catch (error) {
-      console.error('Error sharing file:', error);
-      Alert.alert('Error', 'Failed to share file');
+      console.error('Error saving file:', error);
+      Alert.alert('Error', 'An error occurred while saving the file');
     }
+  };
+
+  // Format file size with more robust handling
+  const formatFileSize = (bytes: number) => {
+    if (!bytes || bytes < 0) return '0 B';
+    if (bytes < 1024) return `${bytes} B`;
+    else if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    else if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    else return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  };
+
+  // Get file icon based on extension
+  const getFileIcon = (fileName: string) => {
+    const ext = fileName?.split('.')?.pop()?.toLowerCase() || '';
+    if (['jpg', 'jpeg', 'png', 'gif'].includes(ext)) return 'image';
+    if (['pdf'].includes(ext)) return 'picture-as-pdf';
+    if (['doc', 'docx'].includes(ext)) return 'description';
+    if (['xls', 'xlsx'].includes(ext)) return 'table-chart';
+    if (['ppt', 'pptx'].includes(ext)) return 'slideshow';
+    if (['zip', 'rar', '7z'].includes(ext)) return 'folder-zip';
+    if (['mp3', 'wav', 'ogg'].includes(ext)) return 'audiotrack';
+    if (['mp4', 'mov', 'avi'].includes(ext)) return 'videocam';
+    return 'insert-drive-file';
   };
 
   return (
     <TouchableOpacity
       style={styles.attachmentContainer}
-      onPress={isComplete ? handleShareFile : handleDownload}
+      onPress={isDownloadComplete ? handleSaveFile : handleDownload}
       disabled={isDownloading}
     >
       <View style={styles.attachmentIconContainer}>
         <MaterialIcons
-          name={isComplete ? 'check-circle' : getFileIcon(attachment.name)}
+          name={isDownloadComplete ? 'check-circle' : getFileIcon(attachment.name)}
           size={25}
-          color={isComplete ? COLORS.success : COLORS.primary}
+          color={isDownloadComplete ? COLORS.success : COLORS.primary}
         />
       </View>
       <View style={styles.attachmentDetails}>
@@ -183,7 +142,7 @@ export const EnhancedFileAttachment = ({
           {isLargeFile && <Text style={{ color: COLORS.warning }}> (Large File)</Text>}
         </Text>
 
-        {downloadStatus && downloadStatus.progress > 1 && !isComplete && (
+        {downloadStatus && downloadStatus.progress > 1 && downloadStatus.progress < 100 && (
           <View style={styles.progressContainer}>
             <View style={styles.progressBar}>
               <View
@@ -200,8 +159,8 @@ export const EnhancedFileAttachment = ({
       <View style={styles.downloadIconContainer}>
         {isDownloading ? (
           <ActivityIndicator size="small" color={COLORS.primary} />
-        ) : isComplete ? (
-          <MaterialIcons name="share" size={25} color={COLORS.success} />
+        ) : isDownloadComplete ? (
+          <MaterialIcons name="save-alt" size={25} color={COLORS.success} />
         ) : (
           <MaterialIcons name="download" size={25} color={COLORS.primary} />
         )}
@@ -210,17 +169,25 @@ export const EnhancedFileAttachment = ({
   );
 };
 
-export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roomId }: any) => {
-  const { fileDownloads, downloadFile, isCacheInitialized, cacheInitPromise } = useWorklet();
+// Updated Image Attachment Component
+export const EnhancedImageAttachment = ({
+  handleAttachmentPress,
+  attachment,
+  roomId
+}: {
+  attachment: any;
+  roomId: string;
+  handleAttachmentPress?: (attachment: any) => void;
+}) => {
+  const { fileDownloads, downloadFile, saveFileToDevice } = useWorklet();
   const [isDownloading, setIsDownloading] = useState(false);
-  const [localPreviewUri, setLocalPreviewUri] = useState(null);
+  const [localPreviewUri, setLocalPreviewUri] = useState<string | null>(null);
   const [autoDownloadInitiated, setAutoDownloadInitiated] = useState(false);
 
   // Create a unique key for this attachment
-  const blobId = createStableBlobId(attachment.blobId);
-  const attachmentKey = `${roomId}_${blobId}`;
+  const attachmentKey = FileCacheManager.createCacheKey(roomId, attachment.blobId);
 
-  // Get download status for this attachment using the unique key
+  // Get download status for this attachment
   const downloadStatus = fileDownloads[attachmentKey];
 
   // Determine if we have a preview or full data
@@ -233,7 +200,7 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
       // Create a proper data URI with the correct mime type
       const mimeType = downloadStatus.mimeType || getMimeTypeFromFilename(attachment.name) || 'image/jpeg';
       const dataUri = `data:${mimeType};base64,${downloadStatus.data}`;
-      setLocalPreviewUri(dataUri as any);
+      setLocalPreviewUri(dataUri);
     } else {
       setLocalPreviewUri(null);
     }
@@ -254,19 +221,32 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
       !autoDownloadInitiated &&
       !isDownloading &&
       !hasPreview &&
-      isImageFile(attachment.name) && isCacheInitialized;
+      FileCacheManager.isImageFile(attachment.name);
 
     if (shouldAutoDownload) {
-      console.log(`Auto-downloading preview for ${attachment.name}`);
       setAutoDownloadInitiated(true);
       downloadPreview();
     }
-  }, [autoDownloadInitiated, hasPreview, attachment.name]);
+  }, [autoDownloadInitiated, hasPreview, attachment.name, isDownloading]);
+
+  // Determine MIME type from filename
+  const getMimeTypeFromFilename = (filename: string) => {
+    const ext = filename?.split('.')?.pop()?.toLowerCase();
+    const mimeTypes: { [key: string]: string } = {
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'png': 'image/png',
+      'gif': 'image/gif',
+      'webp': 'image/webp',
+      'bmp': 'image/bmp',
+      'svg': 'image/svg+xml'
+    };
+    return ext ? mimeTypes[ext] : null;
+  };
 
   const downloadPreview = async () => {
     if (!roomId || !attachment || !attachment.blobId) return;
 
-    console.log(`Downloading preview for ${attachment.name} with key ${attachmentKey}`);
     setIsDownloading(true);
     await downloadFile(roomId, attachment, true, attachmentKey);
   };
@@ -277,7 +257,7 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
       return;
     }
 
-    if (hasPreview || hasFullData) {
+    if (hasPreview && !hasFullData) {
       Alert.alert(
         'Download Full Image',
         `Do you want to download the full-quality version of "${attachment.name}"?`,
@@ -292,63 +272,36 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
           }
         ]
       );
-    } else {
+    } else if (!hasPreview) {
       // If no preview yet, download preview first
       downloadPreview();
+    } else {
+      // If full data already available, save to device
+      handleSaveToDevice();
     }
   };
 
-  const handleSaveToGallery = async () => {
+  const handleSaveToDevice = async () => {
     if (!downloadStatus?.data) return;
 
-    if (Platform.OS === 'web') {
-      // Web download implementation
-      try {
-        const blob = base64ToBlob(downloadStatus.data, downloadStatus.mimeType || 'image/jpeg');
-        const url = URL.createObjectURL(blob as any);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = attachment.name;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      } catch (error) {
-        console.error('Error downloading on web:', error);
-        Alert.alert('Error', 'Failed to download image');
-      }
-      return;
-    }
-
     try {
-      // Request permissions first
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Permission to access media library is required to save images');
-        return;
+      const success = await saveFileToDevice(attachmentKey);
+
+      if (success) {
+        Alert.alert('Success', 'Image saved to device');
+      } else {
+        Alert.alert('Error', 'Failed to save image to device');
       }
-
-      // Save the image to a temp file
-      const fileUri = FileSystem.cacheDirectory + attachment.name;
-      await FileSystem.writeAsStringAsync(fileUri, downloadStatus.data, {
-        encoding: FileSystem.EncodingType.Base64
-      });
-
-      // Save to media library
-      const asset = await MediaLibrary.createAssetAsync(fileUri);
-      await MediaLibrary.createAlbumAsync('Roombase', asset, false);
-
-      Alert.alert('Success', 'Image saved to gallery');
     } catch (error) {
-      console.error('Error saving to gallery:', error);
-      Alert.alert('Error', 'Failed to save image to gallery');
+      console.error('Error saving image to device:', error);
+      Alert.alert('Error', 'An error occurred while saving the image');
     }
   };
 
   return (
     <TouchableOpacity
       style={styles.imageAttachmentContainer}
-      onPress={hasPreview || hasFullData ? handleSaveToGallery : handleFullDownload}
+      onPress={hasFullData ? handleSaveToDevice : handleFullDownload}
       disabled={isDownloading}
     >
       <View style={styles.imageAttachmentPlaceholder}>
@@ -378,14 +331,23 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
           </View>
         )}
 
-        {(hasPreview || hasFullData) && (
+        {(hasPreview || hasFullData) && !isDownloading && (
           <View style={styles.imageActionContainer}>
-            <TouchableOpacity
-              style={styles.imageAction}
-              onPress={handleSaveToGallery}
-            >
-              <MaterialIcons name="save-alt" size={25} color="#FFF" />
-            </TouchableOpacity>
+            {hasFullData ? (
+              <TouchableOpacity
+                style={styles.imageAction}
+                onPress={handleSaveToDevice}
+              >
+                <MaterialIcons name="save-alt" size={25} color="#FFF" />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={styles.imageAction}
+                onPress={handleFullDownload}
+              >
+                <MaterialIcons name="download" size={25} color="#FFF" />
+              </TouchableOpacity>
+            )}
           </View>
         )}
       </View>
@@ -393,18 +355,6 @@ export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roo
   );
 };
 
-// Utility function to convert base64 to Blob for web
-const base64ToBlob = (base64: string, mimeType: string) => {
-  const byteCharacters = atob(base64);
-  const byteNumbers = new Array(byteCharacters.length);
-  for (let i = 0; i < byteCharacters.length; i++) {
-    byteNumbers[i] = byteCharacters.charCodeAt(i);
-  }
-  const byteArray = new Uint8Array(byteNumbers);
-  return new Blob([byteArray], { type: mimeType });
-};
-
-// Styles remain the same as in the original implementation
 const styles = StyleSheet.create({
   attachmentContainer: {
     flexDirection: 'row',

@@ -1,12 +1,13 @@
-// Fixed components/chat/Message.tsx
+// app/components/chat/Message.tsx - updated to use new attachment components
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { COLORS } from '../../utils/constants';
 import { formatTimestamp } from '../../utils/helpers';
 import { EnhancedFileAttachment, EnhancedImageAttachment } from './FileAttachments';
+import { FileCacheManager } from '../../utils/FileCacheManager';
 
 // Message component to render each chat message
-const EnhancedMessage = ({ handleAttachmentPress, message, isOwnMessage, roomId }) => {
+const EnhancedMessage = ({ message, isOwnMessage, roomId }) => {
   if (!message) return null;
 
   // Parse attachments if present
@@ -25,8 +26,7 @@ const EnhancedMessage = ({ handleAttachmentPress, message, isOwnMessage, roomId 
 
       // Ensure we have an array even after parsing
       if (!Array.isArray(attachments)) {
-        // console.warn('Attachments not an array after parsing:', typeof attachments);
-        attachments = JSON.parse(attachments)
+        attachments = JSON.parse(attachments);
       }
     } catch (error) {
       console.error('Error parsing attachments:', error, message.attachments);
@@ -34,6 +34,11 @@ const EnhancedMessage = ({ handleAttachmentPress, message, isOwnMessage, roomId 
     }
   }
 
+  // Handler for attachment press
+  const handleAttachmentPress = (attachment) => {
+    console.log('Attachment pressed:', attachment);
+    // In the future, this could show a detailed view or trigger a download
+  };
 
   return (
     <View style={[
@@ -56,7 +61,7 @@ const EnhancedMessage = ({ handleAttachmentPress, message, isOwnMessage, roomId 
         {/* Render attachments if present */}
         {hasAttachments && attachments.length > 0 && (
           <View style={styles.attachmentsContainer}>
-            {attachments.map((attachment, index) => {
+            {attachments.map((attachment: any, index: any) => {
               if (!attachment || !attachment.name) {
                 console.warn('Invalid attachment at index', index, attachment);
                 return null;
@@ -65,8 +70,8 @@ const EnhancedMessage = ({ handleAttachmentPress, message, isOwnMessage, roomId 
               // Generate a unique ID for this attachment
               const attachmentId = attachment.blobId || `attachment-${message.id}-${index}`;
 
-              const fileExt = (attachment.name || '').split('.').pop().toLowerCase();
-              const isImage = ['jpg', 'jpeg', 'png', 'gif'].includes(fileExt);
+              // Check if file is an image
+              const isImage = FileCacheManager.isImageFile(attachment.name);
 
               return isImage ?
                 <EnhancedImageAttachment
