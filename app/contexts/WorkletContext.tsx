@@ -10,13 +10,26 @@ import useUser from '../hooks/useUser';
 import { Room, Message } from '../types';
 import resetRegistry from './resetSystem';
 import * as MediaLibrary from "expo-media-library"
-import { createStableBlobId } from '../utils/helpers';
+import * as Sharing from "expo-sharing"
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { createStableBlobId, getUTIForMimeType } from '../utils/helpers';
 // Use variables instead of state for callbacks
 let updateRooms: ((rooms: Room[]) => void) | undefined = undefined;
 let updateMessages: ((messages: Message[], replace: boolean) => void) | undefined = undefined;
 let onRoomCreated: ((room: Room) => void) | undefined = undefined;
 let onRoomJoined: ((room: Room) => void) | undefined = undefined;
 let onInviteGenerated: ((roomId: string, inviteCode: string) => void) | undefined = undefined;
+
+
+
+
+const CACHE_METADATA_KEY = '@roombase:fileCache';
+const CACHE_MAX_SIZE = 200 * 1024 * 1024; // 200MB max cache size
+const CACHE_FILE_DIR = `${FileSystem.cacheDirectory}roombase_files/`;
+
+
+
+
 
 export interface WorkletContextType {
   worklet: Worklet | null;
@@ -54,6 +67,9 @@ export interface WorkletContextType {
   };
 
   downloadFile: (roomId: string, attachment: any, preview?: boolean, attachmentKey?: string) => Promise<boolean>;
+  cacheSize: number;
+  clearCache: () => Promise<void>;
+  getCacheInfo: () => { size: number, files: number };
 }
 
 export const WorkletContext = createContext<WorkletContextType>(undefined as any);
@@ -80,6 +96,204 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       fileName?: string;
     }
   }>({});
+  const [cacheMetadata, setCacheMetadata] = useState<{
+    [key: string]: {
+      fileName: string,
+      filePath: string,
+      size: number,
+      timestamp: number,
+      mimeType: string
+    }
+  }>({});
+  const [cacheSize, setCacheSize] = useState(0);
+
+  const initializeCache = useCallback(async () => {
+    try {
+      // Create cache directory if it doesn't exist
+      const dirInfo = await FileSystem.getInfoAsync(CACHE_FILE_DIR);
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(CACHE_FILE_DIR, { intermediates: true });
+      }
+
+      // Load cache metadata from AsyncStorage
+      const metadataString = await AsyncStorage.getItem(CACHE_METADATA_KEY);
+      if (metadataString) {
+        const metadata = JSON.parse(metadataString);
+        setCacheMetadata(metadata);
+
+        // Calculate current cache size
+        const totalSize = Object.values(metadata).reduce((sum, item) => sum + (item.size || 0), 0);
+        setCacheSize(totalSize as any);
+
+        console.log(`Cache initialized: ${Object.keys(metadata).length} files, ${(totalSize / (1024 * 1024)).toFixed(2)}MB`);
+      }
+    } catch (error) {
+      console.error('Error initializing file cache:', error);
+    }
+  }, []);
+
+  const saveCacheMetadata = useCallback(async (metadata: any) => {
+    try {
+      await AsyncStorage.setItem(CACHE_METADATA_KEY, JSON.stringify(metadata));
+    } catch (error) {
+      console.error('Error saving cache metadata:', error);
+    }
+  }, []);
+
+  const addToCache = useCallback(async (cacheKey, fileData, fileName, mimeType, fileSize) => {
+    try {
+      // Create a unique filename to prevent collisions
+      const timestamp = Date.now();
+      const safeFileName = fileName.replace(/[^a-zA-Z0-9\._]/g, '_');
+      const filePath = `${CACHE_FILE_DIR}${timestamp}_${safeFileName}`;
+
+      // Save file to cache directory
+      await FileSystem.writeAsStringAsync(filePath, fileData, {
+        encoding: FileSystem.EncodingType.Base64
+      });
+
+      // Get actual file size if not provided
+      let actualSize = fileSize;
+      if (!actualSize) {
+        const fileInfo = await FileSystem.getInfoAsync(filePath);
+        actualSize = fileInfo.size || fileData.length * 0.75; // Approximation for base64
+      }
+
+      // Update cache metadata
+      const newMetadata = {
+        ...cacheMetadata,
+        [cacheKey]: {
+          fileName,
+          filePath,
+          size: actualSize,
+          timestamp,
+          mimeType
+        }
+      };
+
+      setCacheMetadata(newMetadata);
+      setCacheSize(prev => prev + actualSize);
+      await saveCacheMetadata(newMetadata);
+
+      // Check if we need to clean up cache
+      if (cacheSize + actualSize > CACHE_MAX_SIZE) {
+        cleanCache();
+      }
+
+      return filePath;
+    } catch (error) {
+      console.error('Error adding file to cache:', error);
+      return null;
+    }
+  }, [cacheMetadata, cacheSize, saveCacheMetadata]);
+
+
+  const getFromCache = useCallback(async (cacheKey) => {
+    try {
+      const cachedItem = cacheMetadata[cacheKey];
+      if (!cachedItem) return null;
+
+      // Check if file exists
+      const fileInfo = await FileSystem.getInfoAsync(cachedItem.filePath);
+      if (!fileInfo.exists) {
+        // File was deleted, remove from metadata
+        const newMetadata = { ...cacheMetadata };
+        delete newMetadata[cacheKey];
+        setCacheMetadata(newMetadata);
+        setCacheSize(prev => prev - (cachedItem.size || 0));
+        await saveCacheMetadata(newMetadata);
+        return null;
+      }
+
+      // Read file from cache
+      const fileData = await FileSystem.readAsStringAsync(cachedItem.filePath, {
+        encoding: FileSystem.EncodingType.Base64
+      });
+
+      // Update timestamp to mark as recently used
+      const newMetadata = {
+        ...cacheMetadata,
+        [cacheKey]: {
+          ...cachedItem,
+          timestamp: Date.now()
+        }
+      };
+      setCacheMetadata(newMetadata);
+      await saveCacheMetadata(newMetadata);
+
+      return {
+        data: fileData,
+        mimeType: cachedItem.mimeType,
+        fileName: cachedItem.fileName,
+        path: cachedItem.filePath
+      };
+    } catch (error) {
+      console.error('Error retrieving file from cache:', error);
+      return null;
+    }
+  }, [cacheMetadata, saveCacheMetadata]);
+
+  const cleanCache = useCallback(async () => {
+    try {
+      // Get all cached items sorted by timestamp (oldest first)
+      const items = Object.entries(cacheMetadata)
+        .map(([key, value]) => ({ key, ...value }))
+        .sort((a, b) => a.timestamp - b.timestamp);
+
+      let newSize = cacheSize;
+      const newMetadata = { ...cacheMetadata };
+
+      // Remove oldest files until we're under the limit
+      for (const item of items) {
+        if (newSize <= CACHE_MAX_SIZE * 0.8) break; // Stop when we've freed up 20%
+
+        try {
+          // Delete the file
+          await FileSystem.deleteAsync(item.filePath, { idempotent: true });
+
+          // Update metadata
+          delete newMetadata[item.key];
+          newSize -= item.size || 0;
+
+          console.log(`Removed ${item.fileName} from cache (${(item.size / (1024 * 1024)).toFixed(2)}MB)`);
+        } catch (err) {
+          console.error('Error removing file from cache:', err);
+        }
+      }
+
+      setCacheMetadata(newMetadata);
+      setCacheSize(newSize);
+      await saveCacheMetadata(newMetadata);
+
+      console.log(`Cache cleaned: ${(newSize / (1024 * 1024)).toFixed(2)}MB remaining`);
+    } catch (error) {
+      console.error('Error cleaning cache:', error);
+    }
+  }, [cacheMetadata, cacheSize, saveCacheMetadata]);
+
+  const clearCache = useCallback(async () => {
+    try {
+      // Delete all files
+      await FileSystem.deleteAsync(CACHE_FILE_DIR, { idempotent: true });
+      await FileSystem.makeDirectoryAsync(CACHE_FILE_DIR, { intermediates: true });
+
+      // Reset metadata
+      setCacheMetadata({});
+      setCacheSize(0);
+      await AsyncStorage.removeItem(CACHE_METADATA_KEY);
+
+      console.log('Cache cleared successfully');
+    } catch (error) {
+      console.error('Error clearing cache:', error);
+    }
+  }, []);
+
+
+
+  useEffect(() => {
+    initializeCache();
+  }, []);
+
 
   const reset = useCallback(() => {
     // Reset callback references
@@ -679,12 +893,11 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     }));
   };
 
-  const onFileDownloaded = (data: any) => {
+  const onFileDownloaded = async (data: any) => {
     try {
       const { success, error, attachmentId, data: fileData, mimeType, fileName, preview, roomId, attachmentKey } = data;
-      console.log(attachmentId, attachmentKey)
-      // Generate a truly unique key for this specific download
-      // This ensures different attachments don't overwrite each other
+
+      // Generate a unique key for this download
       const processedAttachmentId = createStableBlobId(attachmentId);
       const uniqueDownloadKey = attachmentKey ||
         (roomId && processedAttachmentId ?
@@ -696,9 +909,26 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
         return;
       }
 
-      console.log(`File download complete for ${uniqueDownloadKey}, preview: ${preview}`);
+      console.log(`File download complete for ${uniqueDownloadKey}, preview: ${preview}, size: ${fileData ? (fileData.length / 1024).toFixed(2) : 0}KB`);
 
-      if (success) {
+      if (success && fileData) {
+        // Cache the file (except tiny previews to save space)
+        if (!preview || fileData.length > 10000) {
+          try {
+            console.log(`Caching file: ${fileName || 'unknown'}, size: ${(fileData.length / 1024).toFixed(2)}KB`);
+            await addToCache(
+              uniqueDownloadKey,
+              fileData,
+              fileName || 'unknown_file',
+              mimeType || 'application/octet-stream',
+              Math.ceil(fileData.length * 0.75) // Estimate size based on base64 length
+            );
+          } catch (cacheError) {
+            console.error('Error caching downloaded file:', cacheError);
+            // Continue anyway since caching is optional
+          }
+        }
+
         // Update the file download with completed data
         setFileDownloads(prev => {
           // Create a new state object to ensure React detects the change
@@ -722,7 +952,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
         // Handle the downloaded file based on platform
         if (Platform.OS !== 'web' && !preview) {
           // For mobile, save the file to the filesystem
-          saveFileToDevice(fileData, fileName, mimeType);
+          await saveFileToDevice(fileData, fileName, mimeType);
         }
       } else {
         // Update state with error
@@ -745,90 +975,260 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
   };
 
 
+
+
+
   // Helper function to save file on mobile
   const saveFileToDevice = async (base64Data, fileName, mimeType) => {
     try {
-      if (Platform.OS === 'android') {
-        // First try using MediaLibrary for common media types
-        if (mimeType.startsWith('image/') || mimeType.startsWith('video/')) {
-          const { status } = await MediaLibrary.requestPermissionsAsync();
-          if (status === 'granted') {
-            // Save to temporary cache first
-            const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
-            await FileSystem.writeAsStringAsync(fileUri, base64Data, {
-              encoding: FileSystem.EncodingType.Base64
-            });
+      const isLargeFile = base64Data.length > 5 * 1024 * 1024; // 5MB threshold
+      console.log(`Saving file ${fileName} (${(base64Data.length / (1024 * 1024)).toFixed(2)}MB)`);
 
-            // Then save to media library
-            await MediaLibrary.saveToLibraryAsync(fileUri);
-            Alert.alert('Success', 'File saved to gallery');
-            return;
+      // Create a safe filename
+      const safeFileName = fileName.replace(/[^a-zA-Z0-9\._]/g, '_');
+
+      // Create a downloads directory if necessary
+      const downloadsDir = `${FileSystem.documentDirectory}downloads/`;
+      const downloadsDirInfo = await FileSystem.getInfoAsync(downloadsDir);
+      if (!downloadsDirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(downloadsDir, { intermediates: true });
+      }
+
+      // Temporary file path in the app's cache
+      const tempFilePath = `${FileSystem.cacheDirectory}${safeFileName}`;
+
+      // For large files, write in chunks to avoid memory issues
+      if (isLargeFile) {
+        console.log(`Large file detected (${safeFileName}), writing in chunks`);
+
+        // Create empty file
+        await FileSystem.writeAsStringAsync(tempFilePath, "", { encoding: FileSystem.EncodingType.UTF8 });
+
+        // Write in chunks of 1MB
+        const chunkSize = 1024 * 1024; // 1MB
+        const totalChunks = Math.ceil(base64Data.length / chunkSize);
+
+        for (let i = 0; i < totalChunks; i++) {
+          const start = i * chunkSize;
+          const end = Math.min(start + chunkSize, base64Data.length);
+          const chunk = base64Data.substring(start, end);
+
+          // Write chunk to file
+          await FileSystem.writeAsStringAsync(
+            tempFilePath,
+            chunk,
+            {
+              encoding: FileSystem.EncodingType.Base64,
+              append: i > 0 // Append for all chunks after the first
+            }
+          );
+
+          console.log(`Wrote chunk ${i + 1}/${totalChunks}`);
+        }
+
+        console.log(`Finished writing file in ${totalChunks} chunks`);
+      } else {
+        // For smaller files, write in one go
+        await FileSystem.writeAsStringAsync(tempFilePath, base64Data, {
+          encoding: FileSystem.EncodingType.Base64
+        });
+      }
+
+      // Now use platform-specific approaches to save/share the file
+      if (Platform.OS === 'android') {
+        // Check file exists and get size
+        const fileInfo = await FileSystem.getInfoAsync(tempFilePath);
+        if (!fileInfo.exists) {
+          throw new Error('File not written correctly');
+        }
+        console.log(`File written to temp: ${fileInfo.size} bytes`);
+
+        // For media files, try MediaLibrary first
+        if (mimeType.startsWith('image/') || mimeType.startsWith('video/')) {
+          try {
+            const { status } = await MediaLibrary.requestPermissionsAsync();
+            if (status === 'granted') {
+              // Save to media library
+              const asset = await MediaLibrary.createAssetAsync(tempFilePath);
+              await MediaLibrary.createAlbumAsync('Roombase', asset, false);
+              Alert.alert('Success', 'Media saved to gallery');
+              return;
+            }
+          } catch (mediaError) {
+            console.error('Error saving to media library:', mediaError);
+            // Continue to other methods if this fails
           }
         }
 
-        // For other file types or if gallery permission denied, use SAF
+        // For other file types or if media library failed, use SAF
         try {
-          // Get permission and directory uri
+          // Get permission to a directory
           const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
 
           if (permissions.granted) {
-            // Save to cache first
-            const cacheFileUri = `${FileSystem.cacheDirectory}${fileName}`;
-            await FileSystem.writeAsStringAsync(cacheFileUri, base64Data, {
-              encoding: FileSystem.EncodingType.Base64
-            });
-
-            // Save file to selected directory
+            // Get a safe destination file name (handle duplicate file names)
             const destinationUri = await FileSystem.StorageAccessFramework.createFileAsync(
               permissions.directoryUri,
-              fileName,
+              safeFileName,
               mimeType
             );
 
-            // Copy from cache to destination
-            const fileContent = await FileSystem.readAsStringAsync(cacheFileUri, {
-              encoding: FileSystem.EncodingType.Base64
-            });
+            // For large files, read and write in chunks
+            if (isLargeFile) {
+              const fileUri = tempFilePath;
+              const fileSize = (await FileSystem.getInfoAsync(fileUri)).size || 0;
+              const chunkSize = 2 * 1024 * 1024; // 2MB chunks for reading
+              const totalChunks = Math.ceil(fileSize / chunkSize);
 
-            await FileSystem.StorageAccessFramework.writeAsStringAsync(
-              destinationUri,
-              fileContent,
-              { encoding: FileSystem.EncodingType.Base64 }
-            );
+              for (let i = 0; i < totalChunks; i++) {
+                const options: any = {
+                  encoding: FileSystem.EncodingType.Base64,
+                  position: i * chunkSize,
+                  length: Math.min(chunkSize, fileSize - (i * chunkSize))
+                };
+
+                // Read chunk from the temp file
+                const chunk = await FileSystem.readAsStringAsync(fileUri, options);
+
+                // Write chunk to the destination
+                await FileSystem.StorageAccessFramework.writeAsStringAsync(
+                  destinationUri,
+                  chunk,
+                  {
+                    encoding: FileSystem.EncodingType.Base64,
+                    append: i > 0 // Append for all chunks after the first
+                  }
+                );
+
+                console.log(`Wrote SAF chunk ${i + 1}/${totalChunks}`);
+              }
+            } else {
+              // For smaller files, read and write in one go
+              const fileContent = await FileSystem.readAsStringAsync(tempFilePath, {
+                encoding: FileSystem.EncodingType.Base64
+              });
+
+              await FileSystem.StorageAccessFramework.writeAsStringAsync(
+                destinationUri,
+                fileContent,
+                { encoding: FileSystem.EncodingType.Base64 }
+              );
+            }
 
             Alert.alert('Success', 'File saved successfully');
             return;
           }
         } catch (safError) {
           console.error('SAF error:', safError);
+          // Continue to next methods if this fails
+        }
+
+        // Last resort - save to downloads folder and notify user
+        try {
+          const finalPath = `${downloadsDir}${safeFileName}`;
+          await FileSystem.moveAsync({
+            from: tempFilePath,
+            to: finalPath
+          });
+
+          Alert.alert(
+            'File Saved',
+            `File saved to app's storage: ${finalPath}\n\nYou can access it from File Manager > Internal Storage > Android > data > [app] > files > downloads`,
+            [{ text: 'OK' }]
+          );
+          return;
+        } catch (moveError) {
+          console.error('Error moving file to downloads:', moveError);
+        }
+      } else if (Platform.OS === 'ios') {
+        // For iOS, use sharing
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(tempFilePath, {
+            mimeType,
+            dialogTitle: `Share ${fileName}`,
+            UTI: getUTIForMimeType(mimeType)
+          });
+        } else {
+          // If sharing is unavailable, save to app's documents directory
+          const finalPath = `${downloadsDir}${safeFileName}`;
+          await FileSystem.moveAsync({
+            from: tempFilePath,
+            to: finalPath
+          });
+
+          Alert.alert('File Saved', `File saved to app documents: ${finalPath}`);
         }
       }
-
-      // For iOS or as fallback, use sharing
-      if (await Sharing.isAvailableAsync()) {
-        // Save to temp location
-        const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
-        await FileSystem.writeAsStringAsync(fileUri, base64Data, {
-          encoding: FileSystem.EncodingType.Base64
-        });
-
-        // Share the file
-        await Sharing.shareAsync(fileUri);
-      } else {
-        // Last resort - just save to cache
-        const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
-        await FileSystem.writeAsStringAsync(fileUri, base64Data, {
-          encoding: FileSystem.EncodingType.Base64
-        });
-
-        Alert.alert('File Saved', `File saved to app cache: ${fileName}`);
-      }
     } catch (error) {
-      console.error('Error saving file:', error);
-      Alert.alert('Error', 'Failed to save file');
+      console.error('Error saving file to device:', error);
+      Alert.alert(
+        'Error Saving File',
+        `There was a problem saving the file: ${error.message}`
+      );
     }
   };
 
+
+
+  const downloadFile = async (roomId: string, attachment: any, preview = false, attachmentKey?: string) => {
+    if (!rpcClient) return false;
+
+    try {
+      // Generate a unique key for this download if not provided
+      const blobId = createStableBlobId(attachment.blobId);
+      const downloadKey = attachmentKey || `${roomId}_${blobId}`;
+
+      // For previews or regular downloads, check cache first
+      if (preview || !attachment.skipCache) {
+        const cachedFile = await getFromCache(downloadKey);
+        if (cachedFile) {
+          console.log(`Loading ${attachment.name} from cache`);
+
+          // Update the download progress immediately to 100%
+          setFileDownloads(prev => ({
+            ...prev,
+            [downloadKey]: {
+              progress: 100,
+              message: 'Loaded from cache',
+              preview,
+              data: cachedFile.data,
+              mimeType: cachedFile.mimeType,
+              fileName: cachedFile.fileName,
+              timestamp: Date.now(),
+              fromCache: true
+            }
+          }));
+
+          return true;
+        }
+      }
+
+      // Reset progress for this attachment using the unique key
+      setFileDownloads(prev => ({
+        ...prev,
+        [downloadKey]: {
+          progress: 0,
+          message: 'Preparing download...',
+          preview
+        }
+      }));
+
+      // Include the attachmentKey in the request
+      const request = rpcClient.request('downloadFile');
+      await request.send(JSON.stringify({
+        roomId,
+        attachment,
+        requestProgress: true,
+        preview,
+        attachmentKey: downloadKey
+      }));
+
+      return true;
+    } catch (err) {
+      console.error('Error requesting file download:', err);
+      return false;
+    }
+  }
 
 
 
@@ -852,39 +1252,13 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     onInviteGenerated,
     setInviteCallbacks,
     fileDownloads,
-    downloadFile: async (roomId: string, attachment: any, preview = false, attachmentKey?: string) => {
-      if (!rpcClient) return false;
-
-      try {
-        // Generate a unique key for this download if not provided
-        const downloadKey = attachmentKey || `${roomId}_${attachment.blobId}`;
-
-        // Reset progress for this attachment using the unique key
-        setFileDownloads(prev => ({
-          ...prev,
-          [downloadKey]: {
-            progress: 0,
-            message: 'Preparing download...',
-            preview
-          }
-        }));
-
-        // Include the attachmentKey in the request
-        const request = rpcClient.request('downloadFile');
-        await request.send(JSON.stringify({
-          roomId,
-          attachment,
-          requestProgress: true,
-          preview,
-          attachmentKey: downloadKey
-        }));
-
-        return true;
-      } catch (err) {
-        console.error('Error requesting file download:', err);
-        return false;
-      }
-    }
+    downloadFile,
+    cacheSize,
+    clearCache,
+    getCacheInfo: () => ({
+      size: cacheSize,
+      files: Object.keys(cacheMetadata).length
+    }),
   };
 
   return (

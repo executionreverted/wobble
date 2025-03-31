@@ -12,7 +12,7 @@ const { IPC } = BareKit
 import UserBase from './userbase/userbase.mjs'
 import RoomBase from './roombase/roombase.mjs'
 import { generateUUID } from './utils.mjs'
-
+console.error(Bare, "init")
 // const path =
 //   Bare.argv[0] === 'android'
 //     ? '/data/data/to.holepunch.bare.expo/autopass-example'
@@ -30,7 +30,7 @@ const getDataPath = () => {
     ? '/data/data/to.holepunch.bare.expo/autopass-example'
     : './tmp/autopass-example';
 
-  return basePath;
+  return basePath + '/' + Bare.pid + '/';
   // Append instance ID if provided
   return instanceId ? `${basePath}-${instanceId}` : basePath;
 };
@@ -1631,6 +1631,8 @@ const createStableBlobId = (blobRef) => {
 };
 
 
+// In backend.mjs, replace the handleFileDownload function with this improved version
+
 const handleFileDownload = async (requestData) => {
   try {
     const params = JSON.parse(requestData);
@@ -1642,7 +1644,9 @@ const handleFileDownload = async (requestData) => {
 
     // Create a unique key for this download
     const blobId = createStableBlobId(attachment.blobId);
-    const downloadKey = attachmentKey || `${roomId}_${blobId}`;    // Get the room
+    const downloadKey = attachmentKey || `${roomId}_${blobId}`;
+
+    // Get the room
     const room = roomBases[roomId];
     if (!room) {
       throw new Error(`Room ${roomId} not found or not initialized`);
@@ -1661,12 +1665,68 @@ const handleFileDownload = async (requestData) => {
         progress: percent,
         message,
         preview,
-        attachmentKey: downloadKey // Include the attachment key
+        attachmentKey: downloadKey
       }));
     } : undefined;
 
     // Get configPath for temp directory
     const configPath = `${path}/downloads`;
+
+    // For image previews, we'll resize them to save bandwidth
+    if (preview && attachment.name &&
+      /\.(jpg|jpeg|png|gif|webp)$/i.test(attachment.name)) {
+
+      if (onProgress) onProgress(10, "Preparing image preview");
+
+      // Use the downloadFile method to fetch the blob data
+      const fullData = await room.downloadFile(attachment, configPath, {
+        onProgress: (percent, message) => {
+          // Scale progress to first 70%
+          if (onProgress) onProgress(Math.floor(percent * 0.7), message);
+        }
+      });
+
+      if (!fullData) {
+        throw new Error('Failed to download image for preview');
+      }
+
+      if (onProgress) onProgress(75, "Processing image preview");
+
+      // Convert file data to base64 for transfer - but reduce size for preview
+      const base64Data = b4a.toString(fullData, 'base64');
+
+      // For preview, we might want to just send a thumbnail
+      // In a real implementation, you would resize the image here
+      const previewData = preview ? base64Data : base64Data;
+
+      // Send the preview data to the client
+      const response = {
+        success: true,
+        roomId,
+        attachmentId: attachment.blobId,
+        fileName: attachment.name,
+        data: previewData,
+        mimeType: attachment.type || getMimeType(attachment.name),
+        preview,
+        attachmentKey: downloadKey
+      };
+
+      if (onProgress) onProgress(100, "Preview ready");
+
+      // Send the file data
+      const completeReq = rpc.request('fileDownloaded');
+      completeReq.send(JSON.stringify(response));
+
+      return { success: true };
+    }
+
+    // For regular file downloads, handle large files better
+    const isLargeFile = attachment.size && attachment.size > 10 * 1024 * 1024; // 10MB
+
+    // For large files, show special message
+    if (isLargeFile && onProgress) {
+      onProgress(5, `Preparing large file download (${Math.round(attachment.size / (1024 * 1024))}MB)`);
+    }
 
     // Use the downloadFile method to fetch the blob data
     const fileData = await room.downloadFile(attachment, configPath, {
@@ -1681,7 +1741,6 @@ const handleFileDownload = async (requestData) => {
     const base64Data = b4a.toString(fileData, 'base64');
 
     // Send the complete file data to the client
-    // For images in preview mode, we might want to resize them first to save bandwidth
     const response = {
       success: true,
       roomId,
@@ -1689,8 +1748,9 @@ const handleFileDownload = async (requestData) => {
       fileName: attachment.name,
       data: base64Data,
       mimeType: attachment.type || getMimeType(attachment.name),
+      fileSize: fileData.length,
       preview,
-      attachmentKey: downloadKey // Include the attachment key
+      attachmentKey: downloadKey
     };
 
     // Send the file data
@@ -1721,6 +1781,8 @@ const handleFileDownload = async (requestData) => {
     return { success: false, error: error.message };
   }
 };
+
+
 
 // Helper to determine MIME type from filename
 const getMimeType = (filename) => {

@@ -198,52 +198,58 @@ export const EnhancedFileAttachment = ({ handleAttachmentPress, attachment, room
   );
 };
 
-// Enhanced image attachment with preview functionality
-
-export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roomId }: { attachment: any; roomId: string }) => {
+export const EnhancedImageAttachment = ({ handleAttachmentPress, attachment, roomId }: any) => {
   const { fileDownloads, downloadFile } = useWorklet();
   const [isDownloading, setIsDownloading] = useState(false);
   const [localPreviewUri, setLocalPreviewUri] = useState(null);
+  const [autoDownloadInitiated, setAutoDownloadInitiated] = useState(false);
 
-  // Use the auto-download hook
-  const { hasPreview, downloadStatus, attachmentKey } = useAutoDownloadPreview(
-    attachment,
-    roomId,
-    downloadFile,
-    fileDownloads,
-    isDownloading,
-    setIsDownloading
-  );  // Create a unique key for this attachment
+  // Create a unique key for this attachment
+  const blobId = createStableBlobId(attachment.blobId);
+  const attachmentKey = `${roomId}_${blobId}`;
+
+  // Get download status for this attachment using the unique key
+  const downloadStatus = fileDownloads[attachmentKey];
+
+  // Determine if we have a preview or full data
+  const hasPreview = Boolean(downloadStatus?.data);
   const hasFullData = Boolean(downloadStatus?.data && !downloadStatus?.preview);
 
-  // Update local URI when download status changes
+  // Update local URI when download status changes - with stable dependencies
   useEffect(() => {
     if (downloadStatus?.data) {
       // Create a proper data URI with the correct mime type
       const mimeType = downloadStatus.mimeType || getMimeTypeFromFilename(attachment.name) || 'image/jpeg';
       const dataUri = `data:${mimeType};base64,${downloadStatus.data}`;
-      console.log(`Setting image preview URI for ${attachmentKey} with mime type ${mimeType}`);
       setLocalPreviewUri(dataUri as any);
     } else {
       setLocalPreviewUri(null);
     }
-  }, [downloadStatus?.data, downloadStatus?.timestamp, attachmentKey, attachment.name]);
+  }, [downloadStatus?.data, downloadStatus?.timestamp, attachment.name]);
 
-  // Update download state and auto-download previews
+  // Update downloading state based on progress
   useEffect(() => {
-    // Update downloading state based on progress
     if (downloadStatus) {
       setIsDownloading(downloadStatus.progress > 0 && downloadStatus.progress < 100);
     } else {
       setIsDownloading(false);
     }
+  }, [downloadStatus]);
 
-    // Auto-download preview if it's an image and we don't have a preview yet
-    if (!downloadStatus && !isDownloading && !hasPreview && isImageFile(attachment.name)) {
+  // Auto-download preview only once when component mounts
+  useEffect(() => {
+    const shouldAutoDownload =
+      !autoDownloadInitiated &&
+      !isDownloading &&
+      !hasPreview &&
+      isImageFile(attachment.name);
+
+    if (shouldAutoDownload) {
       console.log(`Auto-downloading preview for ${attachment.name}`);
+      setAutoDownloadInitiated(true);
       downloadPreview();
     }
-  }, [downloadStatus, attachment, hasPreview, isDownloading]);
+  }, [autoDownloadInitiated, hasPreview, attachment.name]);
 
   const downloadPreview = async () => {
     if (!roomId || !attachment || !attachment.blobId) return;

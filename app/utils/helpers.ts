@@ -141,4 +141,24 @@ export const createStableBlobId = (blobRef: any) => {
 };
 
 
+export const getUTIForMimeType = (mimeType: string) => {
+  // Map common MIME types to UTIs
+  const mimeToUTI = {
+    'image/jpeg': 'public.jpeg',
+    'image/png': 'public.png',
+    'image/gif': 'com.compuserve.gif',
+    'application/pdf': 'com.adobe.pdf',
+    'text/plain': 'public.plain-text',
+    'text/html': 'public.html',
+    'application/json': 'public.json',
+    'application/zip': 'public.zip-archive',
+    'video/mp4': 'public.mpeg-4',
+    'audio/mpeg': 'public.mp3'
+  };
+
+  return mimeToUTI[mimeType] || 'public.data';
+};
+
+
+
 export default {}

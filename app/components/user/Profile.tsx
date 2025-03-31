@@ -15,6 +15,7 @@ import { COLORS } from '../../utils/constants';
 import useUser from '../../hooks/useUser';
 import useWorklet from '../../hooks/useWorklet';
 import ResetAppButton from '../common/ResetAppButton'; // Import the new component
+import FileCacheInfo from '../common/FileCacheInfo';
 
 const Profile = () => {
   const { user, updateUser } = useUser();
@@ -183,6 +184,14 @@ const Profile = () => {
           </TouchableOpacity>
         </View>
       )}
+
+      <View style={styles.cacheSection}>
+        <Text style={styles.sectionTitle}>File Cache</Text>
+        <Text style={styles.cacheDescription}>
+          Files you download are stored in a local cache for faster access.
+        </Text>
+        <FileCacheInfo />
+      </View>
 
       {/* Add the Reset App button section */}
       <View style={styles.resetSection}>
@@ -378,6 +387,17 @@ const styles = StyleSheet.create({
   },
   resetButtonContainer: {
     alignItems: 'center',
+  },
+  cacheSection: {
+    backgroundColor: COLORS.secondaryBackground,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+  },
+  cacheDescription: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginBottom: 16,
   },
 });
 
