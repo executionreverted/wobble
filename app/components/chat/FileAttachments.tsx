@@ -67,7 +67,7 @@ export const EnhancedFileAttachment = ({
     try {
       const success = await saveFileToDevice(attachmentKey);
       if (success) {
-        Alert.alert('Success', 'File saved to device');
+        // Alert.alert('Success', 'File saved to device');
       } else {
         Alert.alert('Error', 'Failed to save file to device');
       }
@@ -284,7 +284,7 @@ export const EnhancedImageAttachment = ({
       }
 
       if (success) {
-        Alert.alert('Success', 'Image opened/saved successfully');
+        // Alert.alert('Success', 'Image opened/saved successfully');
       } else {
         Alert.alert('Error', 'Failed to open/save image');
       }
