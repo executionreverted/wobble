@@ -1088,19 +1088,6 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     });
   }, []);
 
-  const onFileDownloadProgress = useCallback((data: any) => {
-    const { attachmentId, progress, message, preview, attachmentKey } = data;
-    const downloadKey = attachmentKey || attachmentId;
-
-    if (!downloadKey) return;
-
-    updateFileDownload(downloadKey, {
-      progress,
-      message,
-      preview
-    });
-  }, [updateFileDownload]);
-
   const onFileDownloaded = useCallback(async (data: any) => {
     const {
       success,
@@ -1114,8 +1101,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       attachmentKey
     } = data;
 
-    const downloadKey = attachmentKey ||
-      (roomId && attachmentId ? `${roomId}_${attachmentId}` : null);
+    const blobId = createStableBlobId(attachmentId);
+    const downloadKey = attachmentKey || `${roomId}_${blobId}`;
 
     if (!downloadKey) {
       console.error('Missing attachment identifier');
@@ -1124,7 +1111,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
 
     if (success && fileData) {
       updateFileDownload(downloadKey, {
-        progress: 100,
+        progress: 101,  // Matching the original component's complete state
         message: 'Download complete',
         data: fileData,
         mimeType,
@@ -1141,8 +1128,36 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     }
   }, [updateFileDownload]);
 
+  const onFileDownloadProgress = useCallback((data: any) => {
+    const {
+      attachmentId,
+      progress,
+      message,
+      preview,
+      attachmentKey,
+      roomId
+    } = data;
+    const blobId = createStableBlobId(attachmentId);
+    const downloadKey = attachmentKey || `${roomId}_${blobId}`;
 
 
+    if (!downloadKey) {
+      console.warn('No download key available for progress update');
+      return;
+    }
+
+    // Ensure progress is a valid number between 0 and 100
+    const safeProgress = Math.max(0, Math.min(100, Number(progress) || 0));
+
+    // Special handling to match the original component's progress check
+    const adjustedProgress = safeProgress === 100 ? 101 : safeProgress;
+
+    updateFileDownload(downloadKey, {
+      progress: adjustedProgress,
+      message: message || 'Downloading...',
+      preview: preview || false
+    });
+  }, [updateFileDownload]);
 
   // Helper function to save file on mobile
   const saveFileToDevice = async (base64Data, fileName, mimeType) => {
