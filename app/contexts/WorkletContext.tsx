@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode, useRef, useMemo } from 'react';
 import { Worklet } from 'react-native-bare-kit';
 import * as FileSystem from "expo-file-system"
 import { Alert, Platform } from 'react-native';
@@ -1072,108 +1072,74 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     return false
   }, [rpcClient]);
 
+  const updateFileDownload = useCallback((key: string, update: Partial<FileDownloadState>) => {
+    setFileDownloads(prev => {
+      // Only update if there's a meaningful change
+      const currentState = prev[key] || {};
+      const newState = { ...currentState, ...update };
 
-  const onFileDownloadProgress = (data: any) => {
+      const hasChanged = Object.keys(update).some(
+        k => currentState[k] !== newState[k]
+      );
+
+      return hasChanged
+        ? { ...prev, [key]: newState }
+        : prev;
+    });
+  }, []);
+
+  const onFileDownloadProgress = useCallback((data: any) => {
     const { attachmentId, progress, message, preview, attachmentKey } = data;
-
-    // Use the attachmentKey if provided, otherwise fall back to just the attachmentId
     const downloadKey = attachmentKey || attachmentId;
 
     if (!downloadKey) return;
 
-    // Update the download progress for this file
-    setFileDownloads(prev => ({
-      ...prev,
-      [downloadKey]: {
-        ...prev[downloadKey],
-        progress,
-        message,
-        preview
-      }
-    }));
-  };
+    updateFileDownload(downloadKey, {
+      progress,
+      message,
+      preview
+    });
+  }, [updateFileDownload]);
 
-  const onFileDownloaded = async (data: any) => {
-    try {
-      const { success, error, attachmentId, data: fileData, mimeType, fileName, preview, roomId, attachmentKey } = data;
+  const onFileDownloaded = useCallback(async (data: any) => {
+    const {
+      success,
+      error,
+      attachmentId,
+      data: fileData,
+      mimeType,
+      fileName,
+      preview,
+      roomId,
+      attachmentKey
+    } = data;
 
-      // Generate a unique key for this download
-      const processedAttachmentId = createStableBlobId(attachmentId);
-      const uniqueDownloadKey = attachmentKey ||
-        (roomId && processedAttachmentId ?
-          `${roomId}_${processedAttachmentId}` : null
-        );
+    const downloadKey = attachmentKey ||
+      (roomId && attachmentId ? `${roomId}_${attachmentId}` : null);
 
-      if (!uniqueDownloadKey) {
-        console.error('Missing attachment identifier in downloaded file data');
-        return;
-      }
-      console.log('SET CACHE FOR:', uniqueDownloadKey)
-      console.log(`File download complete for ${uniqueDownloadKey}, preview: ${preview}, size: ${fileData ? (fileData.length / 1024).toFixed(2) : 0}KB`);
-
-      if (success && fileData) {
-        // Cache the file (except tiny previews to save space)
-        if (!preview || fileData.length > 10000) {
-          try {
-            console.log(`Caching file: ${fileName || 'unknown'}, size: ${(fileData.length / 1024).toFixed(2)}KB`);
-            await addToCache(
-              uniqueDownloadKey,
-              fileData,
-              fileName || 'unknown_file',
-              mimeType || 'application/octet-stream',
-              Math.ceil(fileData.length * 0.75) // Estimate size based on base64 length
-            );
-          } catch (cacheError) {
-            console.error('Error caching downloaded file:', cacheError);
-            // Continue anyway since caching is optional
-          }
-        }
-
-        // Update the file download with completed data
-        setFileDownloads(prev => {
-          // Create a new state object to ensure React detects the change
-          const newState = { ...prev };
-
-          // Update the specific download entry
-          newState[uniqueDownloadKey] = {
-            ...prev[uniqueDownloadKey],
-            progress: 100,
-            message: 'Download complete',
-            data: fileData,
-            mimeType,
-            fileName,
-            preview,
-            timestamp: Date.now() // Add timestamp to ensure updates are detected
-          };
-
-          return newState;
-        });
-
-        // Handle the downloaded file based on platform
-        if (Platform.OS !== 'web' && !preview) {
-          // For mobile, save the file to the filesystem
-          await saveFileToDevice(fileData, fileName, mimeType);
-        }
-      } else {
-        // Update state with error
-        setFileDownloads(prev => ({
-          ...prev,
-          [uniqueDownloadKey]: {
-            ...prev[uniqueDownloadKey],
-            progress: 0,
-            message: error || 'Download failed',
-            error: true
-          }
-        }));
-
-        // Show error alert
-        Alert.alert('Download Failed', error || 'Failed to download file');
-      }
-    } catch (error) {
-      console.error('Error processing downloaded file:', error);
+    if (!downloadKey) {
+      console.error('Missing attachment identifier');
+      return;
     }
-  };
 
+    if (success && fileData) {
+      updateFileDownload(downloadKey, {
+        progress: 100,
+        message: 'Download complete',
+        data: fileData,
+        mimeType,
+        fileName,
+        preview,
+        timestamp: Date.now()
+      });
+    } else {
+      updateFileDownload(downloadKey, {
+        progress: 0,
+        message: error || 'Download failed',
+        error: true
+      });
+    }
+  }, [updateFileDownload]);
 
 
 
@@ -1440,35 +1406,45 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
 
 
 
-
-  const value = {
+  const value = useMemo(() => (
+    {
+      worklet,
+      isInitialized,
+      isLoading,
+      isBackendReady,
+      error,
+      generateSeedPhrase,
+      confirmSeedPhrase,
+      checkExistingUser,
+      rpcClient,
+      updateRooms,
+      updateMessages,
+      onRoomCreated,
+      setCallbacks,
+      reinitializeBackend,
+      onInviteGenerated,
+      setInviteCallbacks,
+      fileDownloads,
+      downloadFile,
+      cacheSize,
+      clearCache,
+      getCacheInfo: () => ({
+        size: cacheSize,
+        files: Object.keys(cacheMetadata).length
+      }),
+      isCacheInitialized,
+      cacheInitPromise: cacheInitPromise.current
+    }
+  ), [
     worklet,
+    rpcClient,
     isInitialized,
     isLoading,
     isBackendReady,
     error,
-    generateSeedPhrase,
-    confirmSeedPhrase,
-    checkExistingUser,
-    rpcClient,
-    updateRooms,
-    updateMessages,
-    onRoomCreated,
-    setCallbacks,
-    reinitializeBackend,
-    onInviteGenerated,
-    setInviteCallbacks,
     fileDownloads,
-    downloadFile,
-    cacheSize,
-    clearCache,
-    getCacheInfo: () => ({
-      size: cacheSize,
-      files: Object.keys(cacheMetadata).length
-    }),
-    isCacheInitialized,
-    cacheInitPromise: cacheInitPromise.current
-  };
+    updateFileDownload // Include any callback dependencies
+  ])
 
   return (
     <WorkletContext.Provider value={value as any}>
