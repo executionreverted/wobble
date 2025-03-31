@@ -251,12 +251,48 @@ export class FileCacheManager {
     await this.initialize();
 
     const entry = this.cacheMetadata[key];
-    if (!entry) return null;
+    if (!entry) {
+      console.log(`No cache entry found for key: ${key}`);
+      return null;
+    }
+
+    console.log(`Getting file for key: ${key}, path: ${entry.filePath}`);
 
     try {
-      // Check if file exists
-      const fileInfo = await FileSystem.getInfoAsync(entry.filePath);
-      if (!fileInfo.exists || fileInfo.size === 0) {
+      // Check if file exists using FileSystem API
+      const checkPath = async (path) => {
+        try {
+          const fileInfo = await FileSystem.getInfoAsync(path);
+          return fileInfo.exists && fileInfo.size > 0;
+        } catch (err) {
+          console.log(`Error checking path: ${path}`, err.message);
+          return false;
+        }
+      };
+
+      // Prepare various potential paths to check
+      const pathsToCheck = [entry.filePath];
+
+      // Add versions with and without file:// prefix
+      if (!entry.filePath.startsWith('file://')) {
+        pathsToCheck.push(`file://${entry.filePath}`);
+      } else {
+        pathsToCheck.push(entry.filePath.substring(7));
+      }
+
+      // Find a valid path
+      let validPath = null;
+      for (const path of pathsToCheck) {
+        const exists = await checkPath(path);
+        if (exists) {
+          console.log(`Found valid path: ${path}`);
+          validPath = path;
+          break;
+        }
+      }
+
+      if (!validPath) {
+        console.log(`No valid file path found for: ${entry.fileName}. Removing from cache.`);
         // Remove invalid entry
         delete this.cacheMetadata[key];
         this.cacheSize -= entry.size;
@@ -265,9 +301,38 @@ export class FileCacheManager {
       }
 
       // Read file data
-      const data = await FileSystem.readAsStringAsync(entry.filePath, {
-        encoding: FileSystem.EncodingType.Base64
-      });
+      let fileData;
+      try {
+        fileData = await FileSystem.readAsStringAsync(validPath, {
+          encoding: FileSystem.EncodingType.Base64
+        });
+        console.log(`Successfully read file: ${entry.fileName}, data length: ${fileData.length}`);
+      } catch (readError) {
+        console.error(`Error reading file: ${entry.fileName}`, readError);
+
+        // On Android, attempt alternative reading method if possible
+        if (Platform.OS === 'android') {
+          try {
+            console.log('Attempting alternate reading method');
+            const response = await fetch(`file://${validPath}`);
+            const blob = await response.blob();
+            fileData = await new Promise((resolve) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const base64data = reader.result.split(',')[1];
+                resolve(base64data);
+              };
+              reader.readAsDataURL(blob);
+            });
+            console.log(`Alternative read succeeded, data length: ${fileData.length}`);
+          } catch (altReadError) {
+            console.error('Alternative read failed:', altReadError);
+            return null;
+          }
+        } else {
+          return null;
+        }
+      }
 
       // Update timestamp to mark as recently used
       this.cacheMetadata[key] = {
@@ -277,17 +342,16 @@ export class FileCacheManager {
       await this.saveMetadata();
 
       return {
-        data,
-        mimeType: entry.mimeType,
-        fileName: entry.fileName,
-        path: entry.filePath
+        data: fileData,
+        mimeType: entry.mimeType || 'application/octet-stream',
+        fileName: entry.fileName || 'unknown_file',
+        path: validPath
       };
     } catch (error) {
-      console.error(`Error reading file ${entry?.fileName}:`, error);
+      console.error(`Comprehensive error getting file: ${entry?.fileName}`, error);
       return null;
     }
   }
-
   // Move file from temporary storage to permanent downloads
   async saveToPermanentStorage(path: string, fileName: string): Promise<string> {
     await this.initialize();
@@ -347,6 +411,34 @@ export class FileCacheManager {
   // Save file to device's downloads (Android) or share (iOS)
   async saveToDevice(path: string, fileName: string, mimeType: string): Promise<boolean> {
     try {
+      console.log(`Attempting to save file: ${fileName} from path: ${path}`);
+
+      // Verify file exists first to avoid crashes
+      const fileInfo = await FileSystem.getInfoAsync(path);
+      if (!fileInfo.exists) {
+        console.error(`File does not exist at path: ${path}`);
+
+        // If on Android, check if path needs file:// prefix
+        if (Platform.OS === 'android' && !path.startsWith('file://')) {
+          const altPath = `file://${path}`;
+          console.log(`Trying alternative path: ${altPath}`);
+
+          try {
+            const altInfo = await FileSystem.getInfoAsync(altPath);
+            if (altInfo.exists) {
+              path = altPath;
+            } else {
+              return false;
+            }
+          } catch (altCheckError) {
+            console.error('Error checking alternative path:', altCheckError);
+            return false;
+          }
+        } else {
+          return false;
+        }
+      }
+
       if (Platform.OS === 'ios') {
         // On iOS, use the sharing API
         if (await Sharing.isAvailableAsync()) {
@@ -359,47 +451,111 @@ export class FileCacheManager {
         }
         return false;
       } else if (Platform.OS === 'android') {
-        // On Android, try to save to downloads
+        // For Android, try multiple approaches
+
+        // First: For images and videos, save to media library
+        if (FileCacheManager.isImageFile(fileName) ||
+          fileName.toLowerCase().endsWith('.mp4') ||
+          fileName.toLowerCase().endsWith('.mp3')) {
+          try {
+            const { status } = await MediaLibrary.requestPermissionsAsync();
+            if (status === 'granted') {
+              console.log(`Saving media file to library: ${path}`);
+              const asset = await MediaLibrary.createAssetAsync(path);
+              const album = await MediaLibrary.getAlbumAsync('Roombase');
+
+              if (album) {
+                await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+              } else {
+                await MediaLibrary.createAlbumAsync('Roombase', asset, false);
+              }
+
+              Alert.alert(
+                "File Saved",
+                `${fileName} has been saved to your Media Library in the Roombase album`
+              );
+              return true;
+            }
+          } catch (mediaError) {
+            console.error('Media library error:', mediaError);
+          }
+        }
+
+        // Second: Try with SAF
         try {
-          // Try using SAF (Storage Access Framework)
+          console.log('Attempting to save with Storage Access Framework');
           const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
           if (permissions.granted) {
-            const destinationUri = await FileSystem.StorageAccessFramework.createFileAsync(
-              permissions.directoryUri,
-              fileName,
-              mimeType
-            );
+            try {
+              const destinationUri = await FileSystem.StorageAccessFramework.createFileAsync(
+                permissions.directoryUri,
+                fileName,
+                mimeType
+              );
 
-            // Read file content
-            const fileContent = await FileSystem.readAsStringAsync(path, {
-              encoding: FileSystem.EncodingType.Base64
+              // Read file content
+              const fileContent = await FileSystem.readAsStringAsync(path, {
+                encoding: FileSystem.EncodingType.Base64
+              });
+
+              // Write to destination
+              await FileSystem.StorageAccessFramework.writeAsStringAsync(
+                destinationUri,
+                fileContent,
+                { encoding: FileSystem.EncodingType.Base64 }
+              );
+
+              Alert.alert(
+                "File Saved",
+                `${fileName} has been saved to your selected location`
+              );
+              return true;
+            } catch (safWriteError) {
+              console.error('Error writing with SAF:', safWriteError);
+            }
+          }
+        } catch (safError) {
+          console.error('SAF error:', safError);
+        }
+
+        // Final approach: Use sharing intent
+        try {
+          console.log('Attempting to share file:', path);
+          if (await Sharing.isAvailableAsync()) {
+            // Make sure to append file:// if it's missing and required on this device
+            let sharePath = path;
+            if (!path.startsWith('file://') && !path.startsWith('content://')) {
+              sharePath = `file://${path}`;
+            }
+
+            await Sharing.shareAsync(sharePath, {
+              mimeType: mimeType || 'application/octet-stream',
+              dialogTitle: `Save ${fileName}`,
+              UTI: 'public.data'
             });
-
-            // Write to destination
-            await FileSystem.StorageAccessFramework.writeAsStringAsync(
-              destinationUri,
-              fileContent,
-              { encoding: FileSystem.EncodingType.Base64 }
-            );
-
             return true;
           }
-          return false;
-        } catch (error) {
-          console.error('Error saving file via SAF:', error);
-          // Fallback to app's downloads directory
-          const finalPath = await this.saveToPermanentStorage(path, fileName);
-          return !!finalPath;
+        } catch (shareError) {
+          console.error('Share error:', shareError);
+
+          // Last resort: Alert user where the file is
+          if (path.includes('/storage/emulated')) {
+            Alert.alert(
+              "File Location",
+              `The file is available at: ${path.replace('/storage/emulated/0', 'Internal Storage')}`
+            );
+            return true;
+          }
         }
+
+        return false;
       }
       return false;
     } catch (error) {
       console.error(`Error saving file ${fileName} to device:`, error);
       return false;
     }
-  }
-
-  // Share file using system share dialog
+  }  // Share file using system share dialog
   async shareFile(path: string, mimeType: string): Promise<boolean> {
     try {
       if (await Sharing.isAvailableAsync()) {
@@ -415,17 +571,59 @@ export class FileCacheManager {
 
   async openFile(path: string, mimeType: string): Promise<boolean> {
     try {
-      if (await Sharing.isAvailableAsync()) {
-        // This will prompt the user to choose an app to open the file
-        await Sharing.shareAsync(path, {
-          mimeType,
-          dialogTitle: 'Open with'
-        });
-        return true;
+      console.log(`Attempting to open file at path: ${path} with type: ${mimeType}`);
+
+      if (Platform.OS === 'android') {
+        // For Android, we need special handling
+        try {
+          let sharePath = path;
+
+          // Ensure path has file:// prefix if needed
+          if (!path.startsWith('file://') && !path.startsWith('content://')) {
+            sharePath = `file://${path}`;
+            console.log(`Modified path to: ${sharePath}`);
+          }
+
+          if (await Sharing.isAvailableAsync()) {
+            console.log('Using Sharing.shareAsync to open file');
+            await Sharing.shareAsync(sharePath, {
+              mimeType: mimeType || 'application/octet-stream',
+              dialogTitle: 'Open with'
+            });
+            return true;
+          }
+        } catch (shareError) {
+          console.error('Error sharing file on Android:', shareError);
+
+          // Try a different approach for opening - use IntentLauncher if available
+          try {
+            const IntentLauncher = require('expo-intent-launcher');
+            console.log('Attempting to use IntentLauncher');
+
+            await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+              data: path.startsWith('file://') ? path : `file://${path}`,
+              type: mimeType || 'application/octet-stream',
+              flags: 1 // FLAG_GRANT_READ_URI_PERMISSION
+            });
+            return true;
+          } catch (intentError) {
+            console.error('IntentLauncher error:', intentError);
+          }
+        }
       } else {
-        console.error('Sharing not available on this device');
-        return false;
+        // iOS or web
+        if (await Sharing.isAvailableAsync()) {
+          console.log('Using Sharing.shareAsync to open file');
+          await Sharing.shareAsync(path, {
+            mimeType,
+            dialogTitle: 'Open with'
+          });
+          return true;
+        }
       }
+
+      console.log('No method available to open file');
+      return false;
     } catch (error) {
       console.error('Error opening file:', error);
       return false;
@@ -543,6 +741,147 @@ export class FileCacheManager {
     return `${roomId}_${stableBlobId}`;
   }
 
+  async ensureExternalStorageDir() {
+    if (Platform.OS !== 'android') return DOWNLOADS_DIR;
+
+    try {
+      // For Android, try to use a more accessible location
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        console.log('Media library permissions not granted, using app-specific directory');
+        return DOWNLOADS_DIR;
+      }
+
+      // On Android with permission, use a directory in the Pictures folder
+      const albumName = 'Roombase';
+      const album = await MediaLibrary.getAlbumAsync(albumName);
+
+      if (!album) {
+        // Create the album if it doesn't exist
+        const asset = await MediaLibrary.createAssetAsync(DOWNLOADS_DIR + 'placeholder.txt');
+        await MediaLibrary.createAlbumAsync(albumName, asset, false);
+        // Delete the placeholder
+        await FileSystem.deleteAsync(DOWNLOADS_DIR + 'placeholder.txt', { idempotent: true });
+      }
+
+      return DOWNLOADS_DIR; // We'll still download to our app dir, but then move/copy to shared storage
+    } catch (error) {
+      console.error('Error ensuring external storage:', error);
+      return DOWNLOADS_DIR;
+    }
+  }
+
+
+  async registerDownloadedFile(fileData) {
+    const {
+      attachmentKey,
+      filePath,
+      publicFilePath,
+      fileName,
+      mimeType,
+      fileSize,
+      preview
+    } = fileData;
+
+    if (!attachmentKey) {
+      console.error('Missing attachmentKey for registerDownloadedFile');
+      return false;
+    }
+
+    try {
+      console.log('Registering downloaded file:', {
+        attachmentKey,
+        filePath,
+        publicFilePath,
+        fileName
+      });
+
+      // Try to find a valid path that exists
+      let validPath = null;
+      let validSize = fileSize || 0;
+
+      // Check paths with and without file:// prefix
+      const pathsToCheck = [];
+
+      // Add all possible paths to check
+      if (filePath) {
+        pathsToCheck.push(filePath);
+        if (!filePath.startsWith('file://')) pathsToCheck.push(`file://${filePath}`);
+      }
+
+      if (publicFilePath) {
+        pathsToCheck.push(publicFilePath);
+        if (!publicFilePath.startsWith('file://')) pathsToCheck.push(`file://${publicFilePath}`);
+      }
+
+      // Add paths without file:// prefix if they have it
+      if (filePath && filePath.startsWith('file://')) {
+        pathsToCheck.push(filePath.substring(7));
+      }
+
+      if (publicFilePath && publicFilePath.startsWith('file://')) {
+        pathsToCheck.push(publicFilePath.substring(7));
+      }
+
+      console.log('Checking paths:', pathsToCheck);
+
+      // Check each path in order
+      for (const pathToCheck of pathsToCheck) {
+        try {
+          console.log(`Checking path: ${pathToCheck}`);
+          const fileInfo = await FileSystem.getInfoAsync(pathToCheck);
+
+          if (fileInfo.exists && fileInfo.size > 0) {
+            console.log(`Valid file found at: ${pathToCheck}, size: ${fileInfo.size}`);
+            validPath = pathToCheck;
+            validSize = fileInfo.size || validSize;
+            break;
+          } else {
+            console.log(`Path exists but invalid: ${pathToCheck}`);
+          }
+        } catch (checkError) {
+          console.log(`Error checking path: ${pathToCheck}`, checkError.message);
+          // Continue to the next path
+        }
+      }
+
+      // If no valid path found, try one more approach with native filesystem (for Android)
+      if (!validPath && Platform.OS === 'android') {
+        // On Android, these paths might not be accessible through Expo's FileSystem
+        // but might be valid for the native filesystem
+        console.log('No valid path found via FileSystem API, trying direct registration');
+
+        // Prefer the public path if available
+        if (publicFilePath) {
+          console.log(`Using public path directly: ${publicFilePath}`);
+          validPath = publicFilePath;
+        } else if (filePath) {
+          console.log(`Using original path directly: ${filePath}`);
+          validPath = filePath;
+        }
+      }
+
+      if (!validPath) {
+        console.error('File not found in any path');
+        return false;
+      }
+
+      // Register the file directly with the found path
+      return await this.registerExternalFile(
+        attachmentKey,
+        validPath,
+        fileName || 'unknown_file',
+        mimeType || 'application/octet-stream',
+        validSize,
+        preview || false
+      );
+    } catch (error) {
+      console.error('Error registering downloaded file:', error);
+      return false;
+    }
+  }
+
+
   async registerExternalFile(
     key: string,
     existingPath: string,
@@ -554,26 +893,25 @@ export class FileCacheManager {
     await this.initialize();
 
     try {
-      // Check if the file exists
-      const fileInfo = await FileSystem.getInfoAsync(existingPath);
-      if (!fileInfo.exists) {
-        console.error(`File not found at path: ${existingPath}`);
-        return false;
-      }
+      console.log(`Registering external file: ${fileName} at path: ${existingPath}`);
 
-      // Add to cache metadata without copying the file
+      // Add to cache metadata without requiring file existence check
+      // This makes our caching system more robust on Android where
+      // FileSystem.getInfoAsync might fail but the file still exists
       this.cacheMetadata[key] = {
         key,
         fileName,
         filePath: existingPath,
-        size: fileInfo.size || fileSize,
+        size: fileSize || 0,
         timestamp: Date.now(),
-        mimeType,
-        isPreview
+        mimeType: mimeType || 'application/octet-stream',
+        isPreview: isPreview || false
       };
 
-      this.cacheSize += fileInfo.size || fileSize;
+      this.cacheSize += fileSize || 0;
       await this.saveMetadata();
+
+      console.log(`Successfully registered ${fileName} in cache metadata`);
 
       // Clean cache if necessary
       await this.cleanCache();

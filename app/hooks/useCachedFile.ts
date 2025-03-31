@@ -1,5 +1,3 @@
-// app/hooks/useCachedFile.ts
-
 import { useState, useEffect, useCallback } from 'react';
 import fileCacheManager, { FileCacheManager } from '../utils/FileCacheManager';
 import useWorklet from './useWorklet';
@@ -12,6 +10,7 @@ export const useCachedFile = (roomId: string, attachment: any) => {
   const [isDownloading, setIsDownloading] = useState(false);
   const [isCached, setIsCached] = useState(false);
   const [isCheckingCache, setIsCheckingCache] = useState(false);
+  const [hasPreview, setHasPreview] = useState(false);
 
   // Generate attachment key - this is the unique identifier for the file
   const attachmentKey = attachment?.blobId
@@ -29,6 +28,11 @@ export const useCachedFile = (roomId: string, attachment: any) => {
       // If progress is 100%, it's fully downloaded
       if (downloadStatus.progress >= 100) {
         setIsCached(true);
+
+        // Check if this is a preview
+        if (downloadStatus.preview) {
+          setHasPreview(true);
+        }
       }
     } else {
       setIsDownloading(false);
@@ -52,16 +56,17 @@ export const useCachedFile = (roomId: string, attachment: any) => {
           console.log(`File ${attachment.name} found in cache`);
           setIsCached(true);
 
-          // Update the download state if needed without loading the data
-          if (!downloadStatus || downloadStatus.progress < 100) {
-            try {
-              const metadata = await fileCacheManager.getMetadata(attachmentKey);
-              if (metadata) {
-                downloadFile(roomId, attachment, metadata.isPreview, attachmentKey);
+          // Check if it's a preview
+          try {
+            const metadata = await fileCacheManager.getMetadata(attachmentKey);
+            if (metadata) {
+              if (metadata.isPreview) {
+                setHasPreview(true);
               }
-            } catch (metadataError) {
-              console.error('Error getting file metadata:', metadataError);
+              downloadFile(roomId, attachment, metadata.isPreview, attachmentKey);
             }
+          } catch (metadataError) {
+            console.error('Error getting file metadata:', metadataError);
           }
         } else {
           setIsCached(false);
@@ -98,8 +103,10 @@ export const useCachedFile = (roomId: string, attachment: any) => {
     isDownloading,
     isCached,
     isCheckingCache,
+    hasPreview,
     handleDownload
   };
 };
+
 
 export default useCachedFile;

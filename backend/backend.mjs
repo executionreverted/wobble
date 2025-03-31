@@ -1721,24 +1721,33 @@ const handleFileDownload = async (requestData) => {
       attachmentKey
     } = params;
 
-    console.log('Comprehensive File Download Params:', {
+    console.log('File Download Request:', {
       roomId,
       attachmentName: attachment.name,
-      attachmentBlobId: attachment.blobId,
       preview,
-      platformOS: Bare.argv[0]
+      platform: Bare.argv[0]
     });
 
     if (!roomId || !attachment || !attachment.blobId) {
       throw new Error('Invalid file download parameters');
     }
 
-    // Generate download directory based on platform
-    const downloadDir = Path.join(
-      path,
-      'downloads',
-      roomId
-    );
+    // Generate download directory with better Android compatibility
+    let downloadDir;
+
+    if (Bare.argv[0] === 'android') {
+      // For Android, use a directory that's more accessible
+      downloadDir = Path.join(
+        '/data/data/to.holepunch.bare.expo/files/downloads',
+        roomId
+      );
+    } else {
+      downloadDir = Path.join(
+        path,
+        'downloads',
+        roomId
+      );
+    }
 
     // Ensure download directory exists
     if (!fs.existsSync(downloadDir)) {
@@ -1746,20 +1755,13 @@ const handleFileDownload = async (requestData) => {
     }
 
     // Generate safe file path
-    const outputPath = generateSafeFilePath(downloadDir, attachment.name);
-    console.log('Generated Output Path:', outputPath);
+    const safeFileName = attachment.name
+      .replace(/[^a-zA-Z0-9\._-]/g, '_')
+      .replace(/(\.{2,})/g, '.');
+    const timestamp = Date.now();
+    let outputPath = Path.join(downloadDir, `${timestamp}_${safeFileName}`);
 
-    // Resolve input path if it exists
-    let resolvedInputPath = null;
-    if (attachment.path) {
-      try {
-        resolvedInputPath = await resolveFilePath(attachment.path);
-        console.log('Resolved Input Path:', resolvedInputPath);
-      } catch (pathResolutionError) {
-        console.error('Path resolution error:', pathResolutionError);
-        // Continue with other download methods
-      }
-    }
+    console.log('Download Output Path:', outputPath);
 
     // Get the room
     const room = roomBases[roomId];
@@ -1777,8 +1779,7 @@ const handleFileDownload = async (requestData) => {
         progress: percent,
         message,
         preview,
-        attachmentKey,
-        filePath: outputPath
+        attachmentKey
       }));
     } : undefined;
 
@@ -1787,37 +1788,88 @@ const handleFileDownload = async (requestData) => {
       room.downloadFileToPath(attachment, outputPath, {
         onProgress,
         preview,
-        platformOS: Bare.argv[0],
-        resolvedInputPath  // Pass resolved input path if available
+        platformOS: Bare.argv[0]
       }),
       new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Download timeout')), 45000)
       )
     ]);
 
-    console.log('Download complete, result:', downloadResult);
+    console.log('Download complete:', downloadResult);
+
+    // Verify the file exists after download
+    let fileExists = false;
+    try {
+      fileExists = fs.existsSync(outputPath);
+      if (!fileExists) {
+        console.error('Downloaded file not found after download:', outputPath);
+      } else {
+        const fileStats = fs.statSync(outputPath);
+        console.log('File stats:', {
+          size: fileStats.size,
+          path: outputPath
+        });
+      }
+    } catch (verifyError) {
+      console.error('Error verifying file:', verifyError);
+    }
+
+    // For Android, try to make the file more accessible
+    let publicPath = outputPath;
+    if (Bare.argv[0] === 'android' && fileExists) {
+      try {
+        const publicDir = '/storage/emulated/0/Download/Roombase';
+        // Ensure public directory exists
+        if (!fs.existsSync(publicDir)) {
+          try {
+            fs.mkdirSync(publicDir, { recursive: true });
+          } catch (mkdirError) {
+            console.error('Error creating public directory:', mkdirError);
+          }
+        }
+
+        // Copy to public directory if permissions allow
+        try {
+          publicPath = Path.join(publicDir, `${timestamp}_${safeFileName}`);
+          fs.copyFileSync(outputPath, publicPath);
+          console.log('File copied to public directory:', publicPath);
+
+          // Don't modify outputPath, keep track of both paths
+        } catch (copyError) {
+          console.error('Error copying to public directory:', copyError);
+          // Continue with original path
+          publicPath = outputPath;
+        }
+      } catch (accessError) {
+        console.error('Error making file accessible:', accessError);
+        publicPath = outputPath;
+      }
+    }
 
     const response = {
-      success: true,
+      success: fileExists,
       roomId,
       attachmentId: attachment.blobId,
       fileName: attachment.name,
       filePath: outputPath,
+      publicFilePath: publicPath, // Add the public path for Android
       mimeType: attachment.type || getMimeType(attachment.name),
       fileSize: attachment.size || 0,
       preview,
-      attachmentKey
+      attachmentKey,
+      // Add additional data to help debug
+      platform: Bare.argv[0],
+      fileExists: fileExists
     };
 
     const completeReq = rpc.request('fileDownloaded');
     completeReq.send(JSON.stringify(response));
 
-    return { success: true };
+    return { success: fileExists };
   } catch (error) {
-    console.error('Comprehensive Download Error:', {
+    console.error('Download Error:', {
       message: error.message,
-      stack: error.stack,
-      platformOS: Bare.argv[0]
+      stack: error.stack
     });
 
     const response = {
@@ -1832,6 +1884,7 @@ const handleFileDownload = async (requestData) => {
     return { success: false };
   }
 };
+
 // Helper to determine MIME type from filename
 const getMimeType = (filename) => {
   const ext = filename.split('.').pop().toLowerCase();

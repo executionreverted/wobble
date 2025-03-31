@@ -1093,7 +1093,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       success,
       error,
       attachmentId,
-      filePath, // Now we get a path instead of data
+      filePath,
+      publicFilePath, // Add support for the public path
       mimeType,
       fileName,
       preview,
@@ -1109,13 +1110,13 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       return;
     }
 
-    if (success && filePath) {
+    if (success && (filePath || publicFilePath)) {
       try {
         // Update file download state with the path information
         updateFileDownload(downloadKey, {
           progress: 100,
           message: 'Download complete',
-          path: filePath, // Store the path instead of data
+          path: Platform.OS === 'android' && publicFilePath ? publicFilePath : filePath,
           mimeType,
           fileName,
           preview,
@@ -1123,15 +1124,16 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
           fileSize
         });
 
-        // Register file with cache manager without loading data
-        await fileCacheManager.registerExternalFile(
-          downloadKey,
+        // Register file with cache manager with enhanced Android support
+        await fileCacheManager.registerDownloadedFile({
+          attachmentKey: downloadKey,
           filePath,
+          publicFilePath,
           fileName,
           mimeType,
-          fileSize || 0,
+          fileSize,
           preview
-        );
+        });
 
       } catch (storeError) {
         console.error('Error registering downloaded file:', storeError);
@@ -1149,10 +1151,6 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       });
     }
   }, [updateFileDownload]);
-
-
-
-
 
 
 
