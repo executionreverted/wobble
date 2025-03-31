@@ -14,6 +14,7 @@ import fs from 'bare-fs';
 import path from 'bare-path';
 import { generateUUID, sanitizeTextForTerminal } from '../utils.mjs';
 import Hypercore from 'hypercore';
+import Path from "bare-path"
 let roomCorestores = {}
 let roomBases = {}
 class RoomBasePairer extends ReadyResource {
@@ -602,7 +603,7 @@ class RoomBase extends ReadyResource {
     let topic = null;
     let localSwarm = null;
 
-    const tempDir = path.join(configPath, `hypercore-download-${Date.now()}`);
+    const tempDir = Path.join(configPath, `hypercore-download-${Date.now()}`);
     try {
       // Make sure directories exist
       if (!fs.existsSync(configPath)) {
@@ -802,7 +803,7 @@ class RoomBase extends ReadyResource {
     let remoteCore = null;
     let topic = null;
     let localSwarm = null;
-    const tempDir = path.join(path.dirname(outputPath), `temp-download-${Date.now()}`);
+    const tempDir = Path.join(path.dirname(outputPath), `temp-download-${Date.now()}`);
 
     try {
       console.log('Download File to Path Details:', {
