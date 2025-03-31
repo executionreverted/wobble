@@ -413,6 +413,25 @@ export class FileCacheManager {
     }
   }
 
+  async openFile(path: string, mimeType: string): Promise<boolean> {
+    try {
+      if (await Sharing.isAvailableAsync()) {
+        // This will prompt the user to choose an app to open the file
+        await Sharing.shareAsync(path, {
+          mimeType,
+          dialogTitle: 'Open with'
+        });
+        return true;
+      } else {
+        console.error('Sharing not available on this device');
+        return false;
+      }
+    } catch (error) {
+      console.error('Error opening file:', error);
+      return false;
+    }
+  }
+
   // Clear all cache and temp files
   async clearCache(): Promise<void> {
     try {

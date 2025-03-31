@@ -9,8 +9,6 @@ import b4a from "b4a"
 import useUser from '../hooks/useUser';
 import { Room, Message } from '../types';
 import resetRegistry from './resetSystem';
-import * as MediaLibrary from "expo-media-library"
-import * as Sharing from "expo-sharing"
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createStableBlobId, getUTIForMimeType } from '../utils/helpers';
 import fileCacheManager, { FileCacheManager } from '../utils/FileCacheManager';

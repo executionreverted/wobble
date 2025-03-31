@@ -3,8 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Pla
 import { MaterialIcons } from '@expo/vector-icons';
 import { COLORS } from '../../utils/constants';
 import useWorklet from '../../hooks/useWorklet';
-import { FileCacheManager } from '../../utils/FileCacheManager';
-
+import fileCacheManager, { FileCacheManager } from '../../utils/FileCacheManager';
 // Updated File Attachment Component
 export const EnhancedFileAttachment = ({
   handleAttachmentPress,
@@ -285,8 +284,10 @@ export const EnhancedImageAttachment = ({
     if (!downloadStatus?.data) return;
 
     try {
-      const success = await saveFileToDevice(attachmentKey);
-
+      const success = await fileCacheManager.openFile(
+        downloadStatus.path,
+        downloadStatus.mimeType || 'application/octet-stream'
+      );
       if (success) {
         Alert.alert('Success', 'Image saved to device');
       } else {
@@ -316,7 +317,7 @@ export const EnhancedImageAttachment = ({
         ) : (
           <>
             <MaterialIcons name="image" size={49} color={COLORS.primary} />
-            <TouchableOpacity onPress={() => handleAttachmentPress && handleAttachmentPress(attachment)}>
+            <TouchableOpacity onPress={hasFullData ? handleSaveToDevice : () => handleAttachmentPress && handleAttachmentPress(attachment)}>
               <Text style={styles.attachmentName} numberOfLines={2}>{attachment.name}</Text>
             </TouchableOpacity>
           </>
