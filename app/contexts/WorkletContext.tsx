@@ -1093,12 +1093,13 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       success,
       error,
       attachmentId,
-      data: fileData,
+      filePath, // Now we get a path instead of data
       mimeType,
       fileName,
       preview,
       roomId,
-      attachmentKey
+      attachmentKey,
+      fileSize
     } = data;
 
     const downloadKey = FileCacheManager.createCacheKey(roomId, attachmentId);
@@ -1108,38 +1109,35 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       return;
     }
 
-    if (success && fileData) {
+    if (success && filePath) {
       try {
-        // Process the file based on type and size
-        const isImage = FileCacheManager.isImageFile(fileName);
-        const estimatedSize = fileData.length * 0.75; // Base64 to binary estimation
+        // Update file download state with the path information
+        updateFileDownload(downloadKey, {
+          progress: 100,
+          message: 'Download complete',
+          path: filePath, // Store the path instead of data
+          mimeType,
+          fileName,
+          preview,
+          timestamp: Date.now(),
+          fileSize
+        });
 
-        // Store file using the cache manager
-        const { path, cached } = await fileCacheManager.storeFile(
+        // Register file with cache manager without loading data
+        await fileCacheManager.registerExternalFile(
           downloadKey,
-          fileData,
+          filePath,
           fileName,
           mimeType,
-          preview,
-          estimatedSize
+          fileSize || 0,
+          preview
         );
 
-        // Update the file download state
-        updateFileDownload(downloadKey, {
-          progress: 101, // Complete state
-          message: 'Download complete',
-          data: fileData,
-          mimeType,
-          fileName,
-          path,
-          preview,
-          timestamp: Date.now()
-        });
       } catch (storeError) {
-        console.error('Error storing downloaded file:', storeError);
+        console.error('Error registering downloaded file:', storeError);
         updateFileDownload(downloadKey, {
           progress: 0,
-          message: 'Error saving file',
+          message: 'Error registering file',
           error: true
         });
       }
@@ -1151,6 +1149,13 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       });
     }
   }, [updateFileDownload]);
+
+
+
+
+
+
+
 
   const onFileDownloadProgress = useCallback((data: FileProgressData) => {
     const {
@@ -1183,10 +1188,11 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
 
 
   // Helper function to save file on mobile
+  // In WorkletContext.tsx, modify saveFileToDevice:
   const saveFileToDevice = async (downloadKey: string): Promise<boolean> => {
     const downloadData = fileDownloads[downloadKey];
 
-    if (!downloadData || !downloadData.data || !downloadData.fileName) {
+    if (!downloadData) {
       console.error('Missing download data for saving to device');
       return false;
     }
@@ -1194,8 +1200,18 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     try {
       // If we have a path, use it directly
       if (downloadData.path) {
+        // For large files that might not have data in state, but have a path
+        console.log(`Using file path directly: ${downloadData.path}`);
+
+        // Get file info to confirm it exists and has size
+        const fileInfo = await FileSystem.getInfoAsync(downloadData.path);
+        if (!fileInfo.exists || fileInfo.size === 0) {
+          console.error('File path exists but file is invalid');
+          return false;
+        }
+
         // For images and videos, try media library first
-        const isImage = FileCacheManager.isImageFile(downloadData.fileName);
+        const isImage = FileCacheManager.isImageFile(downloadData.fileName || '');
         if (isImage) {
           const saved = await fileCacheManager.saveToMediaLibrary(downloadData.path);
           if (saved) return true;
@@ -1204,32 +1220,46 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
         // For all files, try device storage
         return await fileCacheManager.saveToDevice(
           downloadData.path,
-          downloadData.fileName,
+          downloadData.fileName || 'download.file',
           downloadData.mimeType || 'application/octet-stream'
         );
-      } else {
-        // If no path, store the file first
+      } else if (downloadData.data) {
+        // If we have data in memory
+        console.log(`Using in-memory data for file: ${downloadData.fileName}`);
         const { path } = await fileCacheManager.storeFile(
           downloadKey,
           downloadData.data,
-          downloadData.fileName,
+          downloadData.fileName || 'download.file',
           downloadData.mimeType || 'application/octet-stream',
           false
         );
 
-        // Then save to device
         return await fileCacheManager.saveToDevice(
           path,
-          downloadData.fileName,
+          downloadData.fileName || 'download.file',
           downloadData.mimeType || 'application/octet-stream'
         );
+      } else {
+        // Neither path nor data available - try to load from cache
+        console.log('Attempting to load file data from cache');
+        const cacheData = await fileCacheManager.getFile(downloadKey);
+
+        if (cacheData && cacheData.path) {
+          return await fileCacheManager.saveToDevice(
+            cacheData.path,
+            cacheData.fileName || 'download.file',
+            cacheData.mimeType || 'application/octet-stream'
+          );
+        }
+
+        console.error('Could not find file data in memory or cache');
+        return false;
       }
     } catch (error) {
       console.error('Error saving file to device:', error);
       return false;
     }
   };
-
   // Modify the clearCache function 
   const clearCache = useCallback(async () => {
     await fileCacheManager.clearCache();

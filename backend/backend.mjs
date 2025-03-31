@@ -1631,8 +1631,7 @@ const createStableBlobId = (blobRef) => {
 };
 
 
-// In backend.mjs, replace the handleFileDownload function with this improved version
-
+// Update the handleFileDownload function in backend.mjs
 const handleFileDownload = async (requestData) => {
   try {
     const params = JSON.parse(requestData);
@@ -1652,12 +1651,18 @@ const handleFileDownload = async (requestData) => {
       throw new Error(`Room ${roomId} not found or not initialized`);
     }
 
-    // Make sure room is ready
-    await room.ready();
+    // Set up download directory
+    const downloadDir = `${path}/downloads/${roomId}`;
+    if (!fs.existsSync(downloadDir)) {
+      fs.mkdirSync(downloadDir, { recursive: true });
+    }
 
-    // Set up a progress handler if requested
+    // Generate a safe filename
+    const safeFileName = attachment.name.replace(/[^a-zA-Z0-9\._]/g, '_');
+    const outputPath = `${downloadDir}/${Date.now()}_${safeFileName}`;
+
+    // For progress reporting
     const onProgress = requestProgress ? (percent, message) => {
-      // Send progress update to client
       const progressReq = rpc.request('fileDownloadProgress');
       progressReq.send(JSON.stringify({
         roomId,
@@ -1665,123 +1670,41 @@ const handleFileDownload = async (requestData) => {
         progress: percent,
         message,
         preview,
-        attachmentKey: downloadKey
+        attachmentKey: downloadKey,
+        filePath: outputPath // Include the output path here
       }));
     } : undefined;
 
-    // Get configPath for temp directory
-    const configPath = `${path}/downloads`;
+    if (onProgress) onProgress(5, "Starting download");
 
-    // For image previews, we'll resize them to save bandwidth
-    if (preview && attachment.name &&
-      /\.(jpg|jpeg|png|gif|webp)$/i.test(attachment.name)) {
-
-      if (onProgress) onProgress(10, "Preparing image preview");
-
-      // Use the downloadFile method to fetch the blob data
-      const fullData = await room.downloadFile(attachment, configPath, {
-        onProgress: (percent, message) => {
-          // Scale progress to first 70%
-          if (onProgress) onProgress(Math.floor(percent * 0.7), message);
-        }
-      });
-
-      if (!fullData) {
-        throw new Error('Failed to download image for preview');
-      }
-
-      if (onProgress) onProgress(75, "Processing image preview");
-
-      // Convert file data to base64 for transfer - but reduce size for preview
-      const base64Data = b4a.toString(fullData, 'base64');
-
-      // For preview, we might want to just send a thumbnail
-      // In a real implementation, you would resize the image here
-      const previewData = preview ? base64Data : base64Data;
-
-      // Send the preview data to the client
-      const response = {
-        success: true,
-        roomId,
-        attachmentId: attachment.blobId,
-        fileName: attachment.name,
-        data: previewData,
-        mimeType: attachment.type || getMimeType(attachment.name),
-        preview,
-        attachmentKey: downloadKey
-      };
-
-      if (onProgress) onProgress(100, "Preview ready");
-
-      // Send the file data
-      const completeReq = rpc.request('fileDownloaded');
-      completeReq.send(JSON.stringify(response));
-
-      return { success: true };
-    }
-
-    // For regular file downloads, handle large files better
-    const isLargeFile = attachment.size && attachment.size > 10 * 1024 * 1024; // 10MB
-
-    // For large files, show special message
-    if (isLargeFile && onProgress) {
-      onProgress(5, `Preparing large file download (${Math.round(attachment.size / (1024 * 1024))}MB)`);
-    }
-
-    // Use the downloadFile method to fetch the blob data
-    const fileData = await room.downloadFile(attachment, configPath, {
-      onProgress
+    // Stream the file directly to disk instead of loading into memory
+    await room.downloadFileToPath(attachment, outputPath, {
+      onProgress,
+      preview
     });
 
-    if (!fileData) {
-      throw new Error('Failed to download file');
-    }
-
-    // Convert file data to base64 for transfer
-    const base64Data = b4a.toString(fileData, 'base64');
-
-    // Send the complete file data to the client
+    // When complete, just return the file path and metadata, not the file content
     const response = {
       success: true,
       roomId,
       attachmentId: attachment.blobId,
       fileName: attachment.name,
-      data: base64Data,
+      filePath: outputPath, // Return the path instead of data
       mimeType: attachment.type || getMimeType(attachment.name),
-      fileSize: fileData.length,
+      fileSize: attachment.size || 0,
       preview,
       attachmentKey: downloadKey
     };
 
-    // Send the file data
     const completeReq = rpc.request('fileDownloaded');
     completeReq.send(JSON.stringify(response));
 
     return { success: true };
   } catch (error) {
     console.error('Error handling file download:', error);
-
-    // Extract attachment key if available
-    let attachmentKey;
-    try {
-      const params = JSON.parse(requestData);
-      attachmentKey = params.attachmentKey || (params.attachment?.blobId);
-    } catch (e) {
-      attachmentKey = null;
-    }
-
-    // Notify client of error
-    const errorReq = rpc.request('fileDownloaded');
-    errorReq.send(JSON.stringify({
-      success: false,
-      error: error.message || 'Unknown error during file download',
-      attachmentKey // Include the attachment key for error handling
-    }));
-
-    return { success: false, error: error.message };
+    // Error handling...
   }
 };
-
 
 
 // Helper to determine MIME type from filename

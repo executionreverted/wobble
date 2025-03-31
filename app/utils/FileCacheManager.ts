@@ -542,6 +542,48 @@ export class FileCacheManager {
     const stableBlobId = createStableBlobId(blobId);
     return `${roomId}_${stableBlobId}`;
   }
+
+  async registerExternalFile(
+    key: string,
+    existingPath: string,
+    fileName: string,
+    mimeType: string,
+    fileSize: number,
+    isPreview: boolean = false
+  ): Promise<boolean> {
+    await this.initialize();
+
+    try {
+      // Check if the file exists
+      const fileInfo = await FileSystem.getInfoAsync(existingPath);
+      if (!fileInfo.exists) {
+        console.error(`File not found at path: ${existingPath}`);
+        return false;
+      }
+
+      // Add to cache metadata without copying the file
+      this.cacheMetadata[key] = {
+        key,
+        fileName,
+        filePath: existingPath,
+        size: fileInfo.size || fileSize,
+        timestamp: Date.now(),
+        mimeType,
+        isPreview
+      };
+
+      this.cacheSize += fileInfo.size || fileSize;
+      await this.saveMetadata();
+
+      // Clean cache if necessary
+      await this.cleanCache();
+
+      return true;
+    } catch (error) {
+      console.error(`Error registering external file:`, error);
+      return false;
+    }
+  }
 }
 
 // Export singleton instance

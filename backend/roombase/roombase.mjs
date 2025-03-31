@@ -631,18 +631,18 @@ class RoomBase extends ReadyResource {
 
       // Create hypercore for download
       remoteCore = new Hypercore(tempDir, coreKey, { wait: true });
-      if (onProgress) onProgress(5, "Connected to core");
+      if (onProgress) onProgress(0, "Connected to core");
 
       await remoteCore.ready();
-      if (onProgress) onProgress(10, "Initiated core");
+      if (onProgress) onProgress(0, "Initiated core");
 
       localSwarm = new Hyperswarm();
       topic = await localSwarm.join(coreKey);
-      if (onProgress) onProgress(15, "Joined to swarm");
+      if (onProgress) onProgress(0, "Joined to swarm");
 
       const connectionHandler = (conn) => {
         remoteCore.replicate(conn);
-        if (onProgress) onProgress(20, "Replication is ready");
+        if (onProgress) onProgress(0, "Replication is ready");
       };
 
       localSwarm.on('connection', connectionHandler);
@@ -650,12 +650,12 @@ class RoomBase extends ReadyResource {
       // Wait for peers to connect
       await new Promise(resolve => setTimeout(resolve, 3000));
       await remoteCore.update({ wait: true });
-      if (onProgress) onProgress(25, "Starting hyperblob");
+      if (onProgress) onProgress(0, "Starting hyperblob");
 
       // Create hyperblobs to access the data
       const remoteBlobs = new Hyperblobs(remoteCore);
       await remoteBlobs.ready();
-      if (onProgress) onProgress(30, "Hyperblob is ready");
+      if (onProgress) onProgress(0, "Hyperblob is ready");
 
       // Get the blob ID in the correct format
       const blobId = typeof blobRef.blobId === 'object' ? blobRef.blobId : blobRef.blobId;
@@ -785,6 +785,130 @@ class RoomBase extends ReadyResource {
       return [];
     }
   }
+
+
+
+  // Add this to RoomBase class in roombase.mjs
+  async downloadFileToPath(file, outputPath, options = {}) {
+    const { timeout = 60000, onProgress } = options;
+    let blobRef = file;
+    let remoteCore = null;
+    let topic = null;
+    let localSwarm = null;
+
+    const tempDir = path.join(path.dirname(outputPath), `temp-download-${Date.now()}`);
+    try {
+      // Create temp dir
+      if (!fs.existsSync(tempDir)) {
+        fs.mkdirSync(tempDir, { recursive: true });
+      }
+
+      // Get core key
+      const coreKey = typeof blobRef.coreKey === 'string'
+        ? Buffer.from(blobRef.coreKey, 'hex')
+        : blobRef.coreKey;
+
+      if (onProgress) onProgress(10, "Connecting to peer");
+
+      // Set up hypercore for streaming
+      remoteCore = new Hypercore(tempDir, coreKey, { wait: true });
+      await remoteCore.ready();
+
+      if (onProgress) onProgress(20, "Connected");
+
+      localSwarm = new Hyperswarm();
+      topic = await localSwarm.join(coreKey);
+
+      // Set up replication
+      localSwarm.on('connection', (conn) => {
+        remoteCore.replicate(conn);
+        if (onProgress) onProgress(30, "Streaming started");
+      });
+
+      // Wait for peers
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      await remoteCore.update({ wait: true });
+
+      // Create hyperblobs for streaming
+      const remoteBlobs = new Hyperblobs(remoteCore);
+      await remoteBlobs.ready();
+
+      if (onProgress) onProgress(40, "Ready to download");
+
+      // Get the blob ID
+      const blobId = typeof blobRef.blobId === 'object' ? blobRef.blobId : blobRef.blobId;
+
+      // Create a write stream to file
+      const writeStream = fs.createWriteStream(outputPath);
+      const blobSize = blobRef.size || 0;
+      let bytesWritten = 0;
+
+      // Create read stream from hyperblobs
+      const readStream = remoteBlobs.createReadStream(blobId);
+
+      // Stream the file directly to disk
+      await new Promise((resolve, reject) => {
+        readStream.on('data', chunk => {
+          writeStream.write(chunk);
+          bytesWritten += chunk.length;
+
+          // Report progress
+          if (onProgress && blobSize > 0) {
+            const percentage = 40 + Math.floor(55 * (bytesWritten / blobSize));
+            onProgress(Math.min(95, percentage), "Downloading...");
+          }
+        });
+
+        readStream.on('end', () => {
+          writeStream.end();
+          resolve();
+        });
+
+        readStream.on('error', err => {
+          writeStream.end();
+          reject(err);
+        });
+
+        writeStream.on('error', err => {
+          reject(err);
+        });
+      });
+
+      if (onProgress) onProgress(100, "Download complete");
+
+      // Clean up
+      await localSwarm.destroy();
+      if (topic) await topic.destroy().catch(noop);
+      if (remoteBlobs && remoteBlobs.close) await remoteBlobs.close().catch(noop);
+      if (remoteCore) await remoteCore.close().catch(noop);
+
+      // Remove temp directory
+      fs.rmSync(tempDir, { recursive: true, force: true });
+
+      return outputPath;
+    } catch (err) {
+      console.error('Error streaming file to path:', err);
+      // Clean up on error
+      try {
+        if (localSwarm) await localSwarm.destroy().catch(noop);
+        if (topic) await topic.destroy().catch(noop);
+        if (remoteCore) await remoteCore.close().catch(noop);
+        if (fs.existsSync(tempDir)) fs.rmSync(tempDir, { recursive: true, force: true });
+      } catch (cleanupErr) {
+        console.error('Error during cleanup:', cleanupErr);
+      }
+      throw err;
+    }
+  }
+
+
+
+
+
+
+
+
+
   /**
    * Delete a file from the room
    * @param {string} path - File path or ID to delete
