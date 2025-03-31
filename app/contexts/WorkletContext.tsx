@@ -13,6 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createStableBlobId, getUTIForMimeType } from '../utils/helpers';
 import fileCacheManager, { FileCacheManager } from '../utils/FileCacheManager';
 
+const DOWNLOAD_TIMEOUT_MS = 45000; // 45 seconds timeout
 // Use variables instead of state for callbacks
 let updateRooms: ((rooms: Room[]) => void) | undefined = undefined;
 let updateMessages: ((messages: Message[], replace: boolean) => void) | undefined = undefined;
@@ -86,8 +87,10 @@ export interface WorkletContextType {
       fileName?: string;
     }
   };
+  activeDownloadsRef: any,
   saveFileToDevice: any;
   downloadFile: (roomId: string, attachment: any, preview?: boolean, attachmentKey?: string) => Promise<boolean>;
+  cancelDownload: any
   cacheSize: number;
   clearCache: () => Promise<void>;
   getCacheInfo: () => { size: number, files: number };
@@ -111,6 +114,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
   const [isBackendReady, setIsBackendReady] = useState(false);
   const [isCacheInitialized, setIsCacheInitialized] = useState(false);
   const cacheInitPromise = useRef<Promise<void> | null>(null);
+  const activeDownloadsRef = useRef<Set<string>>(new Set());
 
   const [fileDownloads, setFileDownloads] = useState<{
     [key: string]: {
@@ -277,7 +281,56 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
 
 
 
+  const cancelDownload = useCallback(async (roomId: string, attachmentId: string, attachmentKey?: string) => {
+    if (!rpcClient) return false;
 
+    try {
+      // Determine the key for tracking this download
+      const downloadKey = attachmentKey ||
+        (roomId && attachmentId ? FileCacheManager.createCacheKey(roomId, attachmentId) : null);
+
+      if (!downloadKey) {
+        console.error('Cannot cancel download: missing key information');
+        return false;
+      }
+
+      // If it's in the active downloads list, send a cancellation request to the backend
+      if (activeDownloadsRef.current.has(downloadKey)) {
+        console.log(`Cancelling download for ${downloadKey}`);
+
+        // Send cancellation request to backend
+        const request = rpcClient.request('cancelDownload');
+        await request.send(JSON.stringify({
+          roomId,
+          attachmentId,
+          attachmentKey: downloadKey
+        }));
+
+        // Remove from active downloads list immediately
+        activeDownloadsRef.current.delete(downloadKey);
+
+        // Update UI state to reflect cancellation
+        setFileDownloads(prev => ({
+          ...prev,
+          [downloadKey]: {
+            ...prev[downloadKey],
+            progress: 0,
+            message: 'Download cancelled',
+            error: true,
+            cancelled: true
+          }
+        }));
+
+        return true;
+      } else {
+        console.log(`Download ${downloadKey} not active, nothing to cancel`);
+        return false;
+      }
+    } catch (err) {
+      console.error('Error cancelling download:', err);
+      return false;
+    }
+  }, [rpcClient]);
 
 
 
@@ -787,24 +840,24 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
                             const fileExt = attachment.name.split('.').pop().toLowerCase();
                             const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(fileExt);
 
-                            if (isImage && attachment.blobId) {
-                              console.log(`Auto-downloading preview for new image: ${attachment.name}`);
-                              // Use a small timeout to avoid overwhelming the backend with requests
-                              setTimeout(() => {
-                                const blobId = createStableBlobId(attachment.blobId);
-                                const attachmentKey = `${message.roomId}_${blobId}`;
-
-                                // Download the preview
-                                const downloadRequest = client.request('downloadFile');
-                                downloadRequest.send(JSON.stringify({
-                                  roomId: message.roomId,
-                                  attachment,
-                                  requestProgress: true,
-                                  preview: true,
-                                  attachmentKey
-                                }));
-                              }, 500); // Short delay to let the message appear first
-                            }
+                            // if (isImage && attachment.blobId) {
+                            //   console.log(`Auto-downloading preview for new image: ${attachment.name}`);
+                            //   // Use a small timeout to avoid overwhelming the backend with requests
+                            //   setTimeout(() => {
+                            //     // const blobId = createStableBlobId(attachment.blobId);
+                            //     // const attachmentKey = `${message.roomId}_${blobId}`;
+                            //     //
+                            //     // Download the preview
+                            //     // const downloadRequest = client.request('downloadFile');
+                            //     // downloadRequest.send(JSON.stringify({
+                            //     //   roomId: message.roomId,
+                            //     //   attachment,
+                            //     //   requestProgress: true,
+                            //     //   preview: true,
+                            //     //   attachmentKey
+                            //     // }));
+                            //   }, 500); // Short delay to let the message appear first
+                            // }
                           }
                         }
                       }
@@ -1109,6 +1162,10 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       console.error('Missing attachment identifier');
       return;
     }
+    if (activeDownloadsRef.current.has(downloadKey)) {
+      activeDownloadsRef.current.delete(downloadKey);
+      console.log(`Removed ${downloadKey} from active downloads, remaining: ${activeDownloadsRef.current.size}`);
+    }
 
     if (success && (filePath || publicFilePath)) {
       try {
@@ -1182,6 +1239,13 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       message: message || 'Downloading...',
       preview: preview || false
     });
+
+    if (safeProgress >= 100 || (message && message.toLowerCase().includes('error'))) {
+      if (activeDownloadsRef.current.has(downloadKey)) {
+        activeDownloadsRef.current.delete(downloadKey);
+        console.log(`Removed ${downloadKey} from active downloads on progress complete, remaining: ${activeDownloadsRef.current.size}`);
+      }
+    }
   }, [updateFileDownload]);
 
 
@@ -1277,7 +1341,10 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     try {
       // Generate a unique key for this download if not provided
       const downloadKey = attachmentKey || FileCacheManager.createCacheKey(roomId, attachment.blobId);
-
+      if (activeDownloadsRef.current.has(downloadKey)) {
+        console.log(`Download already in progress for ${attachment.name}`);
+        return true;
+      }
       // Check existing status in fileDownloads state
       const existingStatus = fileDownloads[downloadKey];
       if (existingStatus && existingStatus.progress >= 100) {
@@ -1322,6 +1389,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
 
       // If not in cache, start a new download
       if (!loadFromCache) {
+
+        activeDownloadsRef.current.add(downloadKey);
         // Reset progress for this attachment using the unique key
         setFileDownloads(prev => ({
           ...prev,
@@ -1346,6 +1415,9 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       return true;
     } catch (err) {
       console.error('Error requesting file download:', err);
+      if (attachmentKey) {
+        activeDownloadsRef.current.delete(attachmentKey);
+      }
       return false;
     }
   };
@@ -1371,6 +1443,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       setInviteCallbacks,
       fileDownloads,
       downloadFile,
+      cancelDownload,
       cacheSize,
       clearCache,
       getCacheInfo,
@@ -1386,7 +1459,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     isBackendReady,
     error,
     fileDownloads,
-    updateFileDownload // Include any callback dependencies
+    updateFileDownload,
+    cancelDownload
   ])
 
   return (

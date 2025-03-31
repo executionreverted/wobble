@@ -6,7 +6,7 @@ import useWorklet from './useWorklet';
  * Hook for efficiently working with cached files
  */
 export const useCachedFile = (roomId: string, attachment: any) => {
-  const { fileDownloads, downloadFile } = useWorklet();
+  const { activeDownloadsRef, fileDownloads, downloadFile } = useWorklet();
   const [isDownloading, setIsDownloading] = useState(false);
   const [isCached, setIsCached] = useState(false);
   const [isCheckingCache, setIsCheckingCache] = useState(false);
@@ -20,24 +20,25 @@ export const useCachedFile = (roomId: string, attachment: any) => {
   // Get download status from context
   const downloadStatus = attachmentKey ? fileDownloads[attachmentKey] : null;
 
-  // Check if file is already downloaded in state
   useEffect(() => {
-    if (downloadStatus) {
-      setIsDownloading(downloadStatus.progress > 0 && downloadStatus.progress < 100);
+    // Consider the file downloading if:
+    // 1. It's in progress (progress between 0 and 100)
+    // 2. OR it's in the active downloads ref
+    const inProgress = downloadStatus && downloadStatus.progress > 0 && downloadStatus.progress < 100;
+    const isPending = attachmentKey && activeDownloadsRef?.current?.has(attachmentKey);
 
-      // If progress is 100%, it's fully downloaded
-      if (downloadStatus.progress >= 100) {
-        setIsCached(true);
+    setIsDownloading(inProgress || !!isPending);
 
-        // Check if this is a preview
-        if (downloadStatus.preview) {
-          setHasPreview(true);
-        }
+    // If progress is 100%, it's fully downloaded
+    if (downloadStatus && downloadStatus.progress >= 100) {
+      setIsCached(true);
+
+      // Check if this is a preview
+      if (downloadStatus.preview) {
+        setHasPreview(true);
       }
-    } else {
-      setIsDownloading(false);
     }
-  }, [downloadStatus]);
+  }, [downloadStatus, attachmentKey, activeDownloadsRef]);
 
   // Check cache on component mount - only if we don't already know it's cached
   useEffect(() => {
@@ -85,12 +86,17 @@ export const useCachedFile = (roomId: string, attachment: any) => {
   // Function to handle downloads with cache awareness
   const handleDownload = useCallback(async (preview = false) => {
     if (!attachmentKey || isDownloading) return false;
+    if (isDownloading || (activeDownloadsRef?.current?.has(attachmentKey))) {
+      console.log(`Download already in progress for ${attachment.name}`);
+      return false;
+    }
 
     // If already cached but not in download state, update the state
     if (isCached) {
       console.log(`File ${attachment.name} already cached, updating state`);
       return await downloadFile(roomId, attachment, preview, attachmentKey);
     }
+
 
     // Start a new download
     setIsDownloading(true);

@@ -13,7 +13,10 @@ import UserBase from './userbase/userbase.mjs'
 import RoomBase from './roombase/roombase.mjs'
 import Path from "bare-path"
 import { generateUUID } from './utils.mjs'
-console.error(Bare, "init")
+import { AbortSignal, AbortController } from './AbortController.mjs'
+
+console.error
+  (Bare, "init")
 // const path =
 //   Bare.argv[0] === 'android'
 //     ? '/data/data/to.holepunch.bare.expo/autopass-example'
@@ -22,6 +25,7 @@ console.error(Bare, "init")
 let roomBlobStores = {};
 let roomBlobCores = {};
 let roomBlobSwarms = {}
+const activeDownloads = new Map();
 const getDataPath = () => {
   // Get instance identifier - can be passed as a launch parameter or from env
   const instanceId = Math.ceil(Math.random() * 100)
@@ -246,6 +250,16 @@ const rpc = new RPC(IPC, (req, error) => {
       handleFileDownload(data);
     } catch (e) {
       console.error('Error handling downloadFile command:', e);
+    }
+  }
+
+  if (req.command === 'cancelDownload') {
+    try {
+      const data = b4a.toString(req.data);
+      const parsedData = JSON.parse(data);
+      handleCancelDownload(parsedData);
+    } catch (e) {
+      console.error('Error handling cancelDownload command:', e);
     }
   }
 
@@ -1710,6 +1724,92 @@ const resolveFilePath = async (suggestedPath) => {
   }
 };
 
+const handleCancelDownload = (data) => {
+  try {
+    const { roomId, attachmentId, attachmentKey } = data;
+
+    // Generate a download key if not provided
+    const downloadKey = attachmentKey || `${roomId}_${createStableBlobId(attachmentId)}`;
+
+    console.log(`Handling cancellation request for download: ${downloadKey}`);
+
+    // Check if this download is in our active downloads map
+    if (activeDownloads.has(downloadKey)) {
+      const downloadInfo = activeDownloads.get(downloadKey);
+
+      // Abort the download by signaling the abort controller
+      if (downloadInfo && downloadInfo.abortController) {
+        console.log(`Aborting download for ${downloadKey}`);
+        downloadInfo.abortController.abort();
+      }
+
+      // Clean up any temporary files
+      if (downloadInfo && downloadInfo.tempFilePath) {
+        try {
+          console.log(`Cleaning up temporary file: ${downloadInfo.tempFilePath}`);
+          fs.unlinkSync(downloadInfo.tempFilePath);
+        } catch (fileErr) {
+          console.error('Error removing temporary file:', fileErr);
+        }
+      }
+
+      // Close any swarm connections
+      if (downloadInfo && downloadInfo.swarm) {
+        try {
+          console.log(`Closing swarm for cancelled download: ${downloadKey}`);
+          downloadInfo.swarm.destroy().catch(err =>
+            console.error('Error destroying swarm:', err));
+        } catch (swarmErr) {
+          console.error('Error destroying swarm:', swarmErr);
+        }
+      }
+
+      // Remove from active downloads map
+      activeDownloads.delete(downloadKey);
+
+      // Send cancellation confirmation to client
+      const response = {
+        success: true,
+        downloadKey,
+        message: 'Download cancelled successfully'
+      };
+
+      const req = rpc.request('downloadCancelled');
+      req.send(JSON.stringify(response));
+
+      return true;
+    } else {
+      console.log(`Download ${downloadKey} not found in active downloads`);
+
+      // Send not found response
+      const response = {
+        success: false,
+        downloadKey,
+        message: 'Download not found'
+      };
+
+      const req = rpc.request('downloadCancelled');
+      req.send(JSON.stringify(response));
+
+      return false;
+    }
+  } catch (error) {
+    console.error('Error in handleCancelDownload:', error);
+
+    // Send error response
+    const response = {
+      success: false,
+      error: error.message || 'Unknown error cancelling download'
+    };
+
+    const req = rpc.request('downloadCancelled');
+    req.send(JSON.stringify(response));
+
+    return false;
+  }
+};
+
+// Updated handleFileDownload function in backend.mjs
 const handleFileDownload = async (requestData) => {
   try {
     const params = JSON.parse(requestData);
@@ -1730,6 +1830,43 @@ const handleFileDownload = async (requestData) => {
 
     if (!roomId || !attachment || !attachment.blobId) {
       throw new Error('Invalid file download parameters');
+    }
+
+    // Create a download key for tracking this download
+    const downloadKey = attachmentKey ||
+      (roomId && attachment.blobId ? `${roomId}_${createStableBlobId(attachment.blobId)}` : null);
+
+    if (!downloadKey) {
+      throw new Error('Could not generate download key');
+    }
+
+    // Create an AbortController for cancellation support
+    const abortController = new AbortController();
+    const abortSignal = abortController.signal;
+
+    // Check if there's already an active download for this key
+    if (activeDownloads.has(downloadKey)) {
+      // Cancel the existing download first
+      try {
+        const existingDownload = activeDownloads.get(downloadKey);
+        if (existingDownload && existingDownload.abortController) {
+          existingDownload.abortController.abort();
+        }
+
+        // Clean up any temporary files
+        if (existingDownload && existingDownload.tempFilePath) {
+          try {
+            fs.unlinkSync(existingDownload.tempFilePath);
+          } catch (fileErr) {
+            console.error('Error removing existing temporary file:', fileErr);
+          }
+        }
+      } catch (cancelErr) {
+        console.error('Error cancelling existing download:', cancelErr);
+      }
+
+      // Remove old download info
+      activeDownloads.delete(downloadKey);
     }
 
     // Generate download directory with better Android compatibility
@@ -1754,14 +1891,37 @@ const handleFileDownload = async (requestData) => {
       fs.mkdirSync(downloadDir, { recursive: true });
     }
 
-    // Generate safe file path
+    // Create temporary directory for downloading
+    const tempDir = Path.join(downloadDir, 'temp');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+
+    // Generate safe file path for final destination
     const safeFileName = attachment.name
       .replace(/[^a-zA-Z0-9\._-]/g, '_')
       .replace(/(\.{2,})/g, '.');
     const timestamp = Date.now();
     let outputPath = Path.join(downloadDir, `${timestamp}_${safeFileName}`);
 
-    console.log('Download Output Path:', outputPath);
+    // Create a temporary file path for the download in progress
+    const tempFilePath = Path.join(tempDir, `temp_${timestamp}_${safeFileName}`);
+
+    console.log('Download Paths:', {
+      outputPath,
+      tempFilePath
+    });
+
+    // Track this download in our active downloads map
+    activeDownloads.set(downloadKey, {
+      roomId,
+      attachmentId: attachment.blobId,
+      attachmentKey: downloadKey,
+      tempFilePath,
+      outputPath,
+      abortController,
+      startTime: Date.now()
+    });
 
     // Get the room
     const room = roomBases[roomId];
@@ -1772,6 +1932,13 @@ const handleFileDownload = async (requestData) => {
     // Progress tracking function
     const onProgress = requestProgress ? (percent, message) => {
       console.log(`Download Progress: ${percent}% - ${message}`);
+
+      // Check if the download was cancelled
+      if (abortSignal.aborted) {
+        console.log(`Download ${downloadKey} was aborted, stopping progress updates`);
+        return;
+      }
+
       const progressReq = rpc.request('fileDownloadProgress');
       progressReq.send(JSON.stringify({
         roomId,
@@ -1783,99 +1950,191 @@ const handleFileDownload = async (requestData) => {
       }));
     } : undefined;
 
-    // Attempt download with timeout
-    const downloadResult = await Promise.race([
-      room.downloadFileToPath(attachment, outputPath, {
+    // Keep track of the swarm created for this download 
+    let downloadSwarm = null;
+    let remoteCore = null;
+
+    try {
+      // Attempt download with timeout and abort support
+      const downloadPromise = room.downloadFileToPath(attachment, tempFilePath, {
         onProgress,
         preview,
-        platformOS: Bare.argv[0]
-      }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Download timeout')), 45000)
-      )
-    ]);
+        platformOS: Bare.argv[0],
+        timeout: 45000,  // 45 second timeout
+        signal: abortSignal,
+        onSwarmCreated: (swarm) => {
+          // Store the swarm for potential cleanup
+          downloadSwarm = swarm;
+          if (activeDownloads.has(downloadKey)) {
+            activeDownloads.get(downloadKey).swarm = swarm;
+          }
+        },
+        onCoreCreated: (core) => {
+          // Store the hypercore for potential cleanup
+          remoteCore = core;
+          if (activeDownloads.has(downloadKey)) {
+            activeDownloads.get(downloadKey).core = core;
+          }
+        }
+      });
 
-    console.log('Download complete:', downloadResult);
+      // Wait for download completion, with cancellation awareness
+      await downloadPromise;
 
-    // Verify the file exists after download
-    let fileExists = false;
-    try {
-      fileExists = fs.existsSync(outputPath);
-      if (!fileExists) {
-        console.error('Downloaded file not found after download:', outputPath);
-      } else {
-        const fileStats = fs.statSync(outputPath);
-        console.log('File stats:', {
-          size: fileStats.size,
-          path: outputPath
-        });
+      if (abortSignal.aborted) {
+        console.log(`Download was aborted while waiting for completion`);
+        throw new Error('Download cancelled');
       }
-    } catch (verifyError) {
-      console.error('Error verifying file:', verifyError);
-    }
 
-    // For Android, try to make the file more accessible
-    let publicPath = outputPath;
-    if (Bare.argv[0] === 'android' && fileExists) {
+      console.log('Download complete, moving from temp to final location');
+
+      // Move the file from temp location to final location  
+      if (fs.existsSync(tempFilePath)) {
+        fs.renameSync(tempFilePath, outputPath);
+      } else {
+        throw new Error('Downloaded file not found at temporary location');
+      }
+
+      // Verify the file exists after download
+      let fileExists = false;
       try {
-        const publicDir = '/storage/emulated/0/Download/Roombase';
-        // Ensure public directory exists
-        if (!fs.existsSync(publicDir)) {
+        fileExists = fs.existsSync(outputPath);
+        if (!fileExists) {
+          console.error('Downloaded file not found after download:', outputPath);
+        } else {
+          const fileStats = fs.statSync(outputPath);
+          console.log('File stats:', {
+            size: fileStats.size,
+            path: outputPath
+          });
+        }
+      } catch (verifyError) {
+        console.error('Error verifying file:', verifyError);
+      }
+
+      // For Android, try to make the file more accessible
+      let publicPath = outputPath;
+      if (Bare.argv[0] === 'android' && fileExists) {
+        try {
+          const publicDir = '/storage/emulated/0/Download/Roombase';
+          // Ensure public directory exists
+          if (!fs.existsSync(publicDir)) {
+            try {
+              fs.mkdirSync(publicDir, { recursive: true });
+            } catch (mkdirError) {
+              console.error('Error creating public directory:', mkdirError);
+            }
+          }
+
+          // Copy to public directory if permissions allow
           try {
-            fs.mkdirSync(publicDir, { recursive: true });
-          } catch (mkdirError) {
-            console.error('Error creating public directory:', mkdirError);
+            publicPath = Path.join(publicDir, `${timestamp}_${safeFileName}`);
+            fs.copyFileSync(outputPath, publicPath);
+            console.log('File copied to public directory:', publicPath);
+          } catch (copyError) {
+            console.error('Error copying to public directory:', copyError);
+            // Continue with original path
+            publicPath = outputPath;
+          }
+        } catch (accessError) {
+          console.error('Error making file accessible:', accessError);
+          publicPath = outputPath;
+        }
+      }
+
+      // Clean up the download from active downloads map
+      if (activeDownloads.has(downloadKey)) {
+        console.log(`Removing completed download ${downloadKey} from active downloads`);
+        activeDownloads.delete(downloadKey);
+      }
+
+      const response = {
+        success: fileExists,
+        roomId,
+        attachmentId: attachment.blobId,
+        fileName: attachment.name,
+        filePath: outputPath,
+        publicFilePath: publicPath,
+        mimeType: attachment.type || getMimeType(attachment.name),
+        fileSize: attachment.size || 0,
+        preview,
+        attachmentKey,
+        platform: Bare.argv[0],
+        fileExists: fileExists,
+        isOwnFile: room.blobCore && attachment.coreKey === room.blobCore.key.toString('hex'),
+      };
+
+      const completeReq = rpc.request('fileDownloaded');
+      completeReq.send(JSON.stringify(response));
+
+      return { success: fileExists };
+    } catch (error) {
+      // Check if the error is due to cancellation
+      const isCancelled = abortSignal.aborted ||
+        error.message?.includes('abort') ||
+        error.message?.includes('cancel');
+
+      console.error('Download Error:', {
+        message: error.message,
+        stack: error.stack,
+        isCancelled
+      });
+
+      // Clean up resources
+      try {
+        // Clean up the temporary file if it exists
+        if (fs.existsSync(tempFilePath)) {
+          fs.unlinkSync(tempFilePath);
+        }
+
+        // Clean up swarm and cores
+        if (downloadSwarm) {
+          try {
+            await downloadSwarm.destroy().catch(err =>
+              console.error('Error destroying download swarm:', err));
+          } catch (swarmErr) {
+            console.error('Error destroying swarm:', swarmErr);
           }
         }
 
-        // Copy to public directory if permissions allow
-        try {
-          publicPath = Path.join(publicDir, `${timestamp}_${safeFileName}`);
-          fs.copyFileSync(outputPath, publicPath);
-          console.log('File copied to public directory:', publicPath);
-
-          // Don't modify outputPath, keep track of both paths
-        } catch (copyError) {
-          console.error('Error copying to public directory:', copyError);
-          // Continue with original path
-          publicPath = outputPath;
+        if (remoteCore) {
+          try {
+            await remoteCore.close().catch(err =>
+              console.error('Error closing remote core:', err));
+          } catch (coreErr) {
+            console.error('Error closing core:', coreErr);
+          }
         }
-      } catch (accessError) {
-        console.error('Error making file accessible:', accessError);
-        publicPath = outputPath;
+      } catch (cleanupErr) {
+        console.error('Error during download failure cleanup:', cleanupErr);
       }
+
+      // Remove from active downloads map
+      if (activeDownloads.has(downloadKey)) {
+        console.log(`Removing failed download ${downloadKey} from active downloads`);
+        activeDownloads.delete(downloadKey);
+      }
+
+      const response = {
+        success: false,
+        error: isCancelled ? 'Download cancelled' : (error.message || 'Unknown download error'),
+        details: error.stack,
+        attachmentKey,
+        cancelled: isCancelled
+      };
+
+      const completeReq = rpc.request('fileDownloaded');
+      completeReq.send(JSON.stringify(response));
+
+      return { success: false };
     }
-
-    const response = {
-      success: fileExists,
-      roomId,
-      attachmentId: attachment.blobId,
-      fileName: attachment.name,
-      filePath: outputPath,
-      publicFilePath: publicPath, // Add the public path for Android
-      mimeType: attachment.type || getMimeType(attachment.name),
-      fileSize: attachment.size || 0,
-      preview,
-      attachmentKey,
-      // Add additional data to help debug
-      platform: Bare.argv[0],
-      fileExists: fileExists
-    };
-
-    const completeReq = rpc.request('fileDownloaded');
-    completeReq.send(JSON.stringify(response));
-
-    return { success: fileExists };
-  } catch (error) {
-    console.error('Download Error:', {
-      message: error.message,
-      stack: error.stack
-    });
+  } catch (outerError) {
+    console.error('Fatal download handler error:', outerError);
 
     const response = {
       success: false,
-      error: error.message || 'Unknown download error',
-      details: error.stack
+      error: outerError.message || 'Fatal download error',
+      details: outerError.stack
     };
 
     const completeReq = rpc.request('fileDownloaded');
@@ -1884,7 +2143,6 @@ const handleFileDownload = async (requestData) => {
     return { success: false };
   }
 };
-
 // Helper to determine MIME type from filename
 const getMimeType = (filename) => {
   const ext = filename.split('.').pop().toLowerCase();

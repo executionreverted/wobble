@@ -6,8 +6,82 @@ import { COLORS } from '../../utils/constants';
 import useWorklet from '../../hooks/useWorklet';
 import fileCacheManager, { FileCacheManager } from '../../utils/FileCacheManager';
 import useCachedFile from '../../hooks/useCachedFile';
+import Svg, { Circle } from 'react-native-svg';
 
 
+const DownloadButton = ({
+  isDownloading,
+  progress,
+  onDownload,
+  onCancel
+}: {
+  isDownloading: boolean;
+  progress: number;
+  onDownload: () => void;
+  onCancel: () => void;
+}) => {
+  // Calculate progress for the circle
+  const strokeWidth = 2;
+  const radius = 10;
+  const circumference = 2 * Math.PI * radius;
+  const progressOffset = circumference - (progress / 100) * circumference;
+
+  return (
+    <TouchableOpacity
+      style={styles.downloadButtonContainer}
+      onPress={isDownloading ? onCancel : onDownload}
+      activeOpacity={0.7}
+    >
+      {isDownloading ? (
+        <View style={styles.progressCircleContainer}>
+          {/* Background circle */}
+          <View style={styles.progressCircleBackground}>
+            {/* SVG for progress circle */}
+            <Svg width={24} height={24}>
+              {/* Background circle */}
+              <Circle
+                cx="12"
+                cy="12"
+                r={radius}
+                stroke={COLORS.primary}
+                strokeWidth={strokeWidth}
+                fill="transparent"
+                opacity={0.3}
+              />
+
+              {/* Progress circle */}
+              <Circle
+                cx="12"
+                cy="12"
+                r={radius}
+                stroke={COLORS.primary}
+                strokeWidth={strokeWidth}
+                fill="transparent"
+                strokeDasharray={circumference}
+                strokeDashoffset={progressOffset}
+                strokeLinecap="round"
+                // Start from top (rotate -90 degrees)
+                transform={`rotate(-90, 12, 12)`}
+              />
+            </Svg>
+
+            {/* Cancel icon in the middle */}
+            <View style={styles.cancelIconContainer}>
+              <MaterialIcons name="close" size={14} color={COLORS.error} />
+            </View>
+          </View>
+        </View>
+      ) : (
+        <MaterialIcons name="download" size={24} color={COLORS.primary} />
+      )}
+    </TouchableOpacity>
+  );
+};
+
+
+
+
+// Update the EnhancedImageAttachment component
 export const EnhancedImageAttachment = ({
   handleAttachmentPress,
   attachment,
@@ -17,7 +91,7 @@ export const EnhancedImageAttachment = ({
   roomId: string;
   handleAttachmentPress?: (attachment: any) => void;
 }) => {
-  const { saveFileToDevice } = useWorklet();
+  const { saveFileToDevice, activeDownloadsRef, cancelDownload } = useWorklet();
   const [localPreviewUri, setLocalPreviewUri] = useState<string | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [showPlaceholder, setShowPlaceholder] = useState(true);
@@ -32,12 +106,33 @@ export const EnhancedImageAttachment = ({
     handleDownload
   } = useCachedFile(roomId, attachment);
 
+  // Check if download is pending using ref for reliable synchronous check
+  const isDownloadPending = attachmentKey &&
+    activeDownloadsRef?.current?.has(attachmentKey);
+
+  // Check if there was an error or timeout
+  const hasError = downloadStatus?.error || downloadStatus?.timedOut || false;
+
+  // Combined state that handles all download states
+  const isDownloadActive = (isDownloading || isDownloadPending || isLoadingPreview) && !hasError;
+
   // Determine if download is complete
   const isDownloadComplete = downloadStatus?.progress >= 100 || isCached;
+
+  // Check if the file is from our own blob store (our own uploaded file)
+  const isOwnFile = attachment?.coreKey === attachment?.ownCoreKey;
 
   // Check if we have a path to the file but haven't loaded the data yet
   const hasPath = downloadStatus?.path;
   const needsDataLoading = hasPath && !localPreviewUri && !isLoadingPreview;
+
+  // Auto-preview our own images when component mounts
+  useEffect(() => {
+    if (isOwnFile && !isDownloadActive && !isDownloadComplete && !hasError && !localPreviewUri) {
+      console.log(`Auto-previewing own image: ${attachment.name}`);
+      handleDownload(false); // Download full image since it's our own
+    }
+  }, [isOwnFile, isDownloadActive, isDownloadComplete, hasError, localPreviewUri, attachment.name]);
 
   // Convert data to URI format for display
   useEffect(() => {
@@ -94,8 +189,33 @@ export const EnhancedImageAttachment = ({
     return ext ? mimeTypes[ext] : null;
   };
 
+  // Handle cancellation
+  const handleCancelDownload = () => {
+    if (attachmentKey) {
+      cancelDownload(roomId, attachment.blobId, attachmentKey);
+    }
+  };
+
   const handleImagePress = () => {
-    if (isDownloading || isLoadingPreview) return;
+    // Allow retrying if there was an error
+    if (hasError && !isDownloadActive) {
+      // Start a fresh download
+      handleDownload(true); // Use preview for initial download when retrying
+      return;
+    }
+
+    if (isDownloadActive) {
+      // If already downloading, show cancel option
+      Alert.alert(
+        'Download in Progress',
+        'Do you want to cancel this download?',
+        [
+          { text: 'Continue', style: 'cancel' },
+          { text: 'Cancel Download', style: 'destructive', onPress: handleCancelDownload }
+        ]
+      );
+      return;
+    }
 
     if (isDownloadComplete || localPreviewUri) {
       // We have the image, open/save it
@@ -107,6 +227,20 @@ export const EnhancedImageAttachment = ({
   };
 
   const handleDownloadFullImage = () => {
+    // Check both state and ref for active downloads
+    // Allow retrying if there was an error
+    if (hasError && !isDownloadActive) {
+      // Start a fresh download
+      handleDownload(false); // Full quality on retry
+      return;
+    }
+
+    if (isDownloadActive && !hasPreview) {
+      // If already downloading the full image, show a message
+      Alert.alert('Download in Progress', 'This image is already being downloaded');
+      return;
+    }
+
     // Download full quality image
     handleDownload(false); // false = full quality
   };
@@ -126,9 +260,7 @@ export const EnhancedImageAttachment = ({
         success = await saveFileToDevice(attachmentKey);
       }
 
-      if (success) {
-        // Alert.alert('Success', 'Image opened/saved successfully');
-      } else {
+      if (!success) {
         Alert.alert('Error', 'Failed to open/save image');
       }
     } catch (error) {
@@ -141,7 +273,7 @@ export const EnhancedImageAttachment = ({
     <TouchableOpacity
       style={styles.imageAttachmentContainer}
       onPress={handleImagePress}
-      disabled={isDownloading || isLoadingPreview}
+      disabled={isDownloadActive}
     >
       <View style={styles.imageAttachmentPlaceholder}>
         {localPreviewUri ? (
@@ -152,17 +284,36 @@ export const EnhancedImageAttachment = ({
           />
         ) : (
           <>
-            <MaterialIcons name="image" size={49} color={COLORS.primary} />
+            <MaterialIcons
+              name={hasError ? "broken-image" : "image"}
+              size={49}
+              color={hasError ? COLORS.error : (isOwnFile ? COLORS.info : COLORS.primary)}
+            />
+
+            {isOwnFile && !isDownloadComplete && !isDownloadActive && !hasError && (
+              <View style={styles.ownImageBadge}>
+                <MaterialIcons name="person" size={12} color="#FFF" />
+              </View>
+            )}
+
             <Text
               style={styles.attachmentName}
               numberOfLines={2}
               onPress={() => handleAttachmentPress && handleAttachmentPress(attachment)}
             >
               {attachment.name}
+              {isOwnFile && <Text style={{ color: COLORS.info }}> (Your image)</Text>}
             </Text>
 
+            {/* Show error message if applicable */}
+            {hasError && (
+              <Text style={styles.errorText}>
+                {downloadStatus?.message || 'Download failed. Tap to retry.'}
+              </Text>
+            )}
+
             {/* Show download button for images without preview */}
-            {!isDownloading && !isLoadingPreview && (
+            {!isDownloadActive && !hasError && (
               <TouchableOpacity
                 style={styles.downloadButton}
                 onPress={hasPreview ? handleDownloadFullImage : handleImagePress}
@@ -173,11 +324,32 @@ export const EnhancedImageAttachment = ({
                 </Text>
               </TouchableOpacity>
             )}
+
+            {/* Show retry button for images with errors */}
+            {hasError && (
+              <TouchableOpacity
+                style={[styles.downloadButton, styles.retryButton]}
+                onPress={handleImagePress}
+              >
+                <MaterialIcons name="refresh" size={24} color="#FFF" />
+                <Text style={styles.downloadButtonText}>
+                  Retry Download
+                </Text>
+              </TouchableOpacity>
+            )}
           </>
         )}
 
-        {(isDownloading || isLoadingPreview) && (
+        {isDownloadActive && (
           <View style={styles.imageProgressContainer}>
+            {/* Add cancel button */}
+            <TouchableOpacity
+              style={styles.imageCancel}
+              onPress={handleCancelDownload}
+            >
+              <MaterialIcons name="cancel" size={20} color={COLORS.error} />
+            </TouchableOpacity>
+
             <ActivityIndicator size="small" color={COLORS.primary} />
             <Text style={styles.progressText}>
               {isLoadingPreview ? 'Loading image...' : `${downloadStatus?.progress || 0}% - ${downloadStatus?.message || 'Downloading...'}`}
@@ -185,10 +357,10 @@ export const EnhancedImageAttachment = ({
           </View>
         )}
 
-        {(isDownloadComplete || localPreviewUri) && !isDownloading && !isLoadingPreview && (
+        {(isDownloadComplete || localPreviewUri) && !isDownloadActive && (
           <View style={styles.imageActionContainer}>
             {/* If we only have preview, show download full button */}
-            {hasPreview && !isDownloading && (
+            {hasPreview && !isDownloadPending && (
               <TouchableOpacity
                 style={[styles.imageAction, { backgroundColor: COLORS.primary }]}
                 onPress={handleDownloadFullImage}
@@ -211,6 +383,9 @@ export const EnhancedImageAttachment = ({
 };
 
 
+
+
+// Enhanced FileAttachment with Cancel Button
 export const EnhancedFileAttachment = ({
   handleAttachmentPress,
   attachment,
@@ -220,7 +395,7 @@ export const EnhancedFileAttachment = ({
   roomId: string;
   handleAttachmentPress?: (attachment: any) => void;
 }) => {
-  const { saveFileToDevice } = useWorklet();
+  const { saveFileToDevice, activeDownloadsRef, cancelDownload } = useWorklet();
 
   // Use the cached file hook
   const {
@@ -237,8 +412,54 @@ export const EnhancedFileAttachment = ({
   // Determine if download is complete
   const isDownloadComplete = downloadStatus?.progress >= 100 || isCached;
 
+  // Check if download is pending in the active downloads list using ref for reliable check
+  const isDownloadPending = attachmentKey &&
+    activeDownloadsRef?.current?.has(attachmentKey);
+
+  // Check if there was an error or timeout
+  const hasError = downloadStatus?.error || downloadStatus?.timedOut || false;
+
+  // Combined state that handles all download states
+  const isDownloadActive = (isDownloading || isDownloadPending) && !hasError;
+
+  // Check if the file is from our own blob store (our own uploaded file)
+  const isOwnFile = attachment?.coreKey === attachment?.ownCoreKey;
+
+  // Auto-preview our own files when component mounts
+  useEffect(() => {
+    if (isOwnFile && !isDownloadActive && !isDownloadComplete && !hasError) {
+      console.log(`Auto-previewing own file: ${attachment.name}`);
+      handleDownload(false); // Download full file since it's our own
+    }
+  }, [isOwnFile, isDownloadActive, isDownloadComplete, hasError, attachment.name]);
+
+  // Handle cancellation
+  const handleCancelDownload = () => {
+    if (attachmentKey) {
+      cancelDownload(roomId, attachment.blobId, attachmentKey);
+    }
+  };
+
   const handleDownloadOrOpen = async () => {
-    if (isDownloading) return;
+    // Allow retrying if there was an error
+    if (hasError && !isDownloadActive) {
+      // Start a fresh download
+      handleDownload(false);
+      return;
+    }
+
+    if (isDownloadActive) {
+      // If already downloading, show cancel option
+      Alert.alert(
+        'Download in Progress',
+        'Do you want to cancel this download?',
+        [
+          { text: 'Continue', style: 'cancel' },
+          { text: 'Cancel Download', style: 'destructive', onPress: handleCancelDownload }
+        ]
+      );
+      return;
+    }
 
     if (isDownloadComplete) {
       // If already downloaded, open or save it
@@ -288,19 +509,52 @@ export const EnhancedFileAttachment = ({
     return 'insert-drive-file';
   };
 
+  // Get appropriate icon for error type
+  const getErrorIcon = (errorType: string = 'unknown') => {
+    switch (errorType) {
+      case 'peer_connection':
+        return 'wifi-off';
+      case 'block_not_found':
+        return 'block';
+      case 'timeout':
+        return 'timer-off';
+      case 'corrupt_data':
+        return 'error';
+      case 'network':
+        return 'signal-wifi-off';
+      default:
+        return 'error-outline';
+    }
+  };
+
   return (
     <TouchableOpacity
       style={styles.attachmentContainer}
       onPress={handleDownloadOrOpen}
-      disabled={isDownloading}
+      disabled={isDownloadActive}
     >
       <View style={styles.attachmentIconContainer}>
         <MaterialIcons
-          name={isDownloadComplete ? 'check-circle' : getFileIcon(attachment.name)}
+          name={
+            hasError ? getErrorIcon(downloadStatus?.errorType) :
+              isDownloadComplete ? 'check-circle' :
+                getFileIcon(attachment.name)
+          }
           size={25}
-          color={isDownloadComplete ? COLORS.success : COLORS.primary}
+          color={
+            hasError ? COLORS.error :
+              isDownloadComplete ? COLORS.success :
+                isOwnFile ? COLORS.info : COLORS.primary
+          }
         />
+
+        {isOwnFile && !isDownloadComplete && !isDownloadActive && !hasError && (
+          <View style={styles.ownFileBadge}>
+            <MaterialIcons name="person" size={10} color="#FFF" />
+          </View>
+        )}
       </View>
+
       <View style={styles.attachmentDetails}>
         <Text
           style={styles.attachmentName}
@@ -311,37 +565,81 @@ export const EnhancedFileAttachment = ({
         </Text>
         <Text style={styles.attachmentSize}>
           {formatFileSize(attachment.size || 1)}
-          {isLargeFile && <Text style={{ color: COLORS.warning }}> (Large File)</Text>}
+          {isLargeFile && <Text style={{ color: COLORS.warning }}> (Large)</Text>}
+          {isOwnFile && <Text style={{ color: COLORS.info }}> (Your file)</Text>}
         </Text>
 
-        {isDownloading && downloadStatus && (
+        {isDownloadActive && downloadStatus && (
           <View style={styles.progressContainer}>
-            <View style={styles.progressBar}>
-              <View
-                style={[styles.progressFill, { width: `${downloadStatus.progress}%` }]}
-              />
+            <View style={styles.progressBarContainer}>
+              <View style={styles.progressBar}>
+                <View
+                  style={[styles.progressFill, { width: `${downloadStatus.progress}%` }]}
+                />
+              </View>
+
+              {/* Cancel button */}
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={handleCancelDownload}
+              >
+                <MaterialIcons name="cancel" size={16} color={COLORS.error} />
+              </TouchableOpacity>
             </View>
             <Text style={styles.progressText}>
               {downloadStatus.progress}% - {downloadStatus.message || 'Downloading...'}
             </Text>
           </View>
         )}
+
+        {hasError && downloadStatus && (
+          <View style={styles.errorContainer}>
+            <MaterialIcons
+              name={getErrorIcon(downloadStatus.errorType)}
+              size={18}
+              color={COLORS.error}
+            />
+            <Text style={styles.errorText}>
+              {downloadStatus.userMessage || downloadStatus.message || 'Download failed. Tap to retry.'}
+            </Text>
+          </View>
+        )}
       </View>
 
       <View style={styles.downloadIconContainer}>
-        {isDownloading ? (
-          <ActivityIndicator size="small" color={COLORS.primary} />
+        {isDownloadActive ? (
+          <DownloadButton
+            isDownloading={true}
+            progress={downloadStatus?.progress || 0}
+            onDownload={() => { }}
+            onCancel={handleCancelDownload}
+          />
+        ) : hasError ? (
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => handleDownload(false)}
+          >
+            <MaterialIcons name="refresh" size={22} color="#FFF" />
+          </TouchableOpacity>
         ) : isDownloadComplete ? (
-          <MaterialIcons name="save-alt" size={25} color={COLORS.success} />
+          <TouchableOpacity
+            style={styles.saveButton}
+            onPress={handleSaveFile}
+          >
+            <MaterialIcons name="save-alt" size={22} color="#FFF" />
+          </TouchableOpacity>
         ) : (
-          <MaterialIcons name="download" size={25} color={COLORS.primary} />
+          <DownloadButton
+            isDownloading={false}
+            progress={0}
+            onDownload={() => handleDownload(false)}
+            onCancel={() => { }}
+          />
         )}
       </View>
     </TouchableOpacity>
   );
-};
-
-// Image Attachment Component
+};// Image Attachment Component
 
 const styles = StyleSheet.create({
   attachmentContainer: {
@@ -382,17 +680,7 @@ const styles = StyleSheet.create({
   progressContainer: {
     marginTop: 5,
   },
-  progressBar: {
-    height: 5,
-    backgroundColor: 'rgba(1,0,0,0.1)',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '101%',
-    backgroundColor: COLORS.primary,
-    borderRadius: 3,
-  },
+
   progressText: {
     fontSize: 11,
     color: COLORS.textSecondary,
@@ -455,6 +743,140 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginLeft: 8,
     fontSize: 14,
+  },
+  progressBarContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  progressBar: {
+    flex: 1,
+    height: 5,
+    backgroundColor: 'rgba(1,0,0,0.1)',
+    borderRadius: 3,
+    overflow: 'hidden',
+    marginRight: 8,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: COLORS.primary,
+    borderRadius: 3,
+  },
+  cancelButton: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(237, 66, 69, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  errorContainer: {
+    marginTop: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  errorText: {
+    fontSize: 12,
+    color: COLORS.error,
+    marginLeft: 4,
+    flex: 1,
+  },
+  retryButton: {
+    backgroundColor: COLORS.error,
+  },
+  cancelButtonText: {
+    fontSize: 10,
+    color: COLORS.error,
+    fontWeight: 'bold',
+  },
+  downloadButtonContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(114, 137, 218, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  progressCircleContainer: {
+    position: 'relative',
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  progressCircleBackground: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cancelIconContainer: {
+    position: 'absolute',
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  ownFileBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: COLORS.info,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#fff',
+  },
+  ownImageBadge: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: COLORS.info,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#fff',
+  },
+
+  // Styles for action buttons
+  saveButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.success,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  retryButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.error,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  // Image attachment cancel button
+  imageCancel: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
   },
 });
 

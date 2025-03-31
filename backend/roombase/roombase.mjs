@@ -789,14 +789,15 @@ class RoomBase extends ReadyResource {
 
 
 
-  // Add this to RoomBase class in roombase.mjs
-  // Enhanced downloadFileToPath method for RoomBase in roombase.mjs
   async downloadFileToPath(file, outputPath, options = {}) {
     const {
       timeout = 60000,
       onProgress,
       preview = false,
-      platformOS
+      platformOS,
+      signal,  // AbortSignal for cancellation
+      onSwarmCreated, // Callback for swarm creation
+      onCoreCreated   // Callback for core creation
     } = options;
 
     let blobRef = file;
@@ -810,8 +811,14 @@ class RoomBase extends ReadyResource {
         outputPath,
         blobRef,
         platformOS,
-        preview
+        preview,
+        hasSignal: !!signal
       });
+
+      // Check for cancellation before starting
+      if (signal && signal.aborted) {
+        throw new Error('Download cancelled before starting');
+      }
 
       // Ensure output directory exists
       const outputDir = path.dirname(outputPath);
@@ -822,6 +829,11 @@ class RoomBase extends ReadyResource {
       // Create temp directory
       if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir, { recursive: true });
+      }
+
+      // Check for cancellation before checking local blob
+      if (signal && signal.aborted) {
+        throw new Error('Download cancelled before blob check');
       }
 
       // Check if this is our own blob store first
@@ -854,6 +866,11 @@ class RoomBase extends ReadyResource {
         }
       }
 
+      // Check for cancellation before proceeding to remote download
+      if (signal && signal.aborted) {
+        throw new Error('Download cancelled before remote setup');
+      }
+
       // Prepare core key
       const coreKey = typeof blobRef.coreKey === 'string'
         ? b4a.from(blobRef.coreKey, 'hex')
@@ -863,12 +880,29 @@ class RoomBase extends ReadyResource {
       remoteCore = new Hypercore(tempDir, coreKey, { wait: true });
       if (onProgress) onProgress(10, "Connected to core");
 
+      // Notify caller about the core creation
+      if (onCoreCreated) onCoreCreated(remoteCore);
+
       await remoteCore.ready();
       if (onProgress) onProgress(20, "Core ready");
 
+      // Check for cancellation after core is ready
+      if (signal && signal.aborted) {
+        throw new Error('Download cancelled after core ready');
+      }
+
       localSwarm = new Hyperswarm();
+
+      // Notify caller about the swarm creation
+      if (onSwarmCreated) onSwarmCreated(localSwarm);
+
       topic = await localSwarm.join(coreKey);
       if (onProgress) onProgress(30, "Joined swarm");
+
+      // Check for cancellation after joining swarm
+      if (signal && signal.aborted) {
+        throw new Error('Download cancelled after joining swarm');
+      }
 
       // Set up replication
       localSwarm.on('connection', (conn) => {
@@ -876,14 +910,42 @@ class RoomBase extends ReadyResource {
         if (onProgress) onProgress(40, "Replication started");
       });
 
-      // Wait for peers
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      // Wait for peers with cancellation support
+      const peerWaitPromise = new Promise((resolve, reject) => {
+        const peerTimeout = setTimeout(() => resolve(), 3000);
+
+        // Set up cancellation handler
+        if (signal) {
+          signal.addEventListener('abort', () => {
+            clearTimeout(peerTimeout);
+            reject(new Error('Download cancelled during peer wait'));
+          }, { once: true });
+        }
+      });
+
+      try {
+        await peerWaitPromise;
+      } catch (waitError) {
+        // This will be caught by the main try/catch if it's a cancellation
+        throw waitError;
+      }
+
+      // Check for cancellation before updating
+      if (signal && signal.aborted) {
+        throw new Error('Download cancelled before core update');
+      }
+
       await remoteCore.update({ wait: true });
 
       // Create hyperblobs for streaming
       const remoteBlobs = new Hyperblobs(remoteCore);
       await remoteBlobs.ready();
       if (onProgress) onProgress(50, "Hyperblob ready");
+
+      // Check for cancellation after hyperblobs is ready
+      if (signal && signal.aborted) {
+        throw new Error('Download cancelled after hyperblob ready');
+      }
 
       // Get the blob ID
       const blobId = typeof blobRef.blobId === 'object'
@@ -898,8 +960,18 @@ class RoomBase extends ReadyResource {
       // Create read stream from hyperblobs
       const readStream = remoteBlobs.createReadStream(blobId);
 
-      // Stream the file directly to disk
+      // Stream the file directly to disk with cancellation support
       await new Promise((resolve, reject) => {
+        // Set up cancellation handler
+        if (signal) {
+          signal.addEventListener('abort', () => {
+            // Clean up the streams
+            readStream.destroy();
+            writeStream.end();
+            reject(new Error('Download cancelled during streaming'));
+          }, { once: true });
+        }
+
         readStream.on('data', chunk => {
           writeStream.write(chunk);
           bytesWritten += chunk.length;
@@ -947,7 +1019,8 @@ class RoomBase extends ReadyResource {
         message: err.message,
         stack: err.stack,
         blobRef,
-        outputPath
+        outputPath,
+        isCancelled: signal?.aborted
       });
 
       // Cleanup on error
@@ -963,7 +1036,6 @@ class RoomBase extends ReadyResource {
       throw err;
     }
   }
-
 
 
 
