@@ -121,6 +121,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
         const metadata = JSON.parse(metadataString);
         setCacheMetadata(metadata);
 
+        console.log({ metadata })
+
         // Calculate current cache size
         const totalSize = Object.values(metadata).reduce((sum, item) => sum + (item.size || 0), 0);
         setCacheSize(totalSize as any);
@@ -159,6 +161,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
         actualSize = fileInfo.size || fileData.length * 0.75; // Approximation for base64
       }
 
+      console.log('UPDATEEEE', cacheMetadata)
+
       // Update cache metadata
       const newMetadata = {
         ...cacheMetadata,
@@ -168,8 +172,10 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
           size: actualSize,
           timestamp,
           mimeType
-        }
+        },
+        length: (cacheMetadata.length || 0) + 1
       };
+
 
       setCacheMetadata(newMetadata);
       setCacheSize(prev => prev + actualSize);
@@ -270,6 +276,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       console.error('Error cleaning cache:', error);
     }
   }, [cacheMetadata, cacheSize, saveCacheMetadata]);
+
+
 
   const clearCache = useCallback(async () => {
     try {
