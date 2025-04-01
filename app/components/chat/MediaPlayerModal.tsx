@@ -205,7 +205,6 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
     if (!filePath) return 'other';
 
     const ext = filePath.split('.').pop()?.toLowerCase() || '';
-    console.log({ ext })
     if (['mp4', 'mov', 'avi', 'webm', 'mkv'].includes(ext)) return 'video';
     if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext)) return 'image';
     if (['mp3', 'wav', 'ogg', 'm4a', 'aac'].includes(ext)) return 'audio';

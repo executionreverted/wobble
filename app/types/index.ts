@@ -62,4 +62,21 @@ export type MessageBatch = {
   hasMore: boolean;
 };
 
+export interface FileAttachment {
+  path: string;
+  name: string;
+  size: number;
+  blobId: string | any;
+  coreKey: string;
+  ownCoreKey: string;
+  timestamp: number;
+  sender: string;
+  metadata?: {
+    mimeType?: string;
+    preview?: boolean;
+  };
+}
+
 export default {}
+
+

@@ -230,6 +230,12 @@ const rpc = new RPC(IPC, (req, error) => {
     handleFileUpload(data);
   }
 
+  if (req.command === 'getRoomFiles') {
+    const data = b4a.toString(req.data);
+    const parsedData = JSON.parse(data);
+    getRoomFiles(parsedData);
+  }
+
   if (req.command === 'fileDownloadProgress') {
     try {
       const data = b4a.toString(req.data);
@@ -1154,7 +1160,48 @@ const loadMoreMessages = async (params) => {
   }
 };
 
+const getRoomFiles = async (params) => {
+  const { roomId, limit = 50, before = null } = params;
 
+  try {
+    const room = roomBases[roomId];
+    if (!room) {
+      throw new Error(`Room ${roomId} not found`);
+    }
+
+    const files = await room.getFiles();
+
+    // Sort files by timestamp in descending order
+    const sortedFiles = files.sort((a, b) => b.timestamp - a.timestamp);
+
+    // Apply optional limit and before timestamp
+    const filteredFiles = before
+      ? sortedFiles.filter(file => file.timestamp < before).slice(0, limit)
+      : sortedFiles.slice(0, limit);
+
+    const response = {
+      success: true,
+      roomId,
+      files: filteredFiles,
+      hasMore: sortedFiles.length > filteredFiles.length
+    };
+
+    const req = rpc.request('roomFiles');
+    req.send(JSON.stringify(response));
+
+  } catch (error) {
+    console.error(`Error getting files for room ${roomId}:`, error);
+    const response = {
+      success: false,
+      roomId,
+      error: error.message,
+      files: []
+    };
+
+    const req = rpc.request('roomFiles');
+    req.send(JSON.stringify(response));
+  }
+};
 
 // Get all rooms the user is part of
 const getRooms = async () => {

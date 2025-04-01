@@ -24,6 +24,7 @@ import useWorklet from '../../hooks/useWorklet';
 import RoomHeader from './RoomHeader';
 import { selectImage, takePhoto } from '../../utils/permissionHelpers';
 import RoomDetailsModal from './RoomDetailsModal';
+import { FileAttachment } from '@/app/types';
 
 const EnhancedChatRoom = () => {
   const { currentRoom, messages, sendMessage, loadMoreMessages } = useChat();
@@ -41,7 +42,7 @@ const EnhancedChatRoom = () => {
   const [roomDetailsModalVisible, setRoomDetailsModalVisible] = useState(false);
 
   // Handle text input content size change
-  const handleContentSizeChange = (event) => {
+  const handleContentSizeChange = (event: any) => {
     const { height } = event.nativeEvent.contentSize;
     // Constrain height between min and max values
     const newHeight = Math.min(Math.max(44, height), 120); // min: ~1 line, max: ~4 lines
@@ -57,26 +58,18 @@ const EnhancedChatRoom = () => {
     if (currentRoom) {
       navigation.setOptions({
         headerTitle: () => (
-          <TouchableOpacity
-            onPress={() => setRoomDetailsModalVisible(true)}
-            style={styles.headerTitleContainer}
-          >
-            <Text style={styles.headerTitle}>#{currentRoom.name}</Text>
-            <MaterialIcons name="keyboard-arrow-down" size={20} color={COLORS.textPrimary} />
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity
+              onPress={() => setRoomDetailsModalVisible(true)}
+              style={styles.headerTitleContainer}
+            >
+              <Text style={styles.headerTitle}>#{currentRoom.name}</Text>
+              <MaterialIcons name="keyboard-arrow-down" size={20} color={COLORS.textPrimary} />
+            </TouchableOpacity>
+
+            <RoomHeader roomId={currentRoom?.id} roomName={currentRoom?.name} />
+          </>
         ),
-        headerRight: () => (
-          <TouchableOpacity
-            style={styles.shareButton}
-            onPress={() => {
-              // You can implement share functionality or leave it to RoomHeader
-              // This is just a placeholder
-              Alert.alert('Share', 'Share room feature would open here');
-            }}
-          >
-            <MaterialIcons name="share" size={24} color={COLORS.textPrimary} />
-          </TouchableOpacity>
-        )
       });
     }
   }, [currentRoom, navigation]);
@@ -98,17 +91,7 @@ const EnhancedChatRoom = () => {
     };
   }, []);
 
-  // // Set room header with sharing functionality
-  // useEffect(() => {
-  //   if (currentRoom) {
-  //     // Add the RoomHeader component to provide share functionality
-  //     navigation.setOptions({
-  //       headerTitle: () => (
-  //         <RoomHeader roomId={currentRoom.id} roomName={currentRoom.name} />
-  //       )
-  //     });
-  //   }
-  // }, [currentRoom, navigation]);
+
 
   // Function to handle sending a message
   const handleSendMessage = async () => {
@@ -125,7 +108,7 @@ const EnhancedChatRoom = () => {
   };
 
   // Upload a file to the current room
-  const uploadFile = async (fileInfo) => {
+  const uploadFile = async (fileInfo: any) => {
     if (!currentRoom?.id || !rpcClient) return;
 
     try {
@@ -135,7 +118,7 @@ const EnhancedChatRoom = () => {
         roomId: currentRoom.id,
         ...fileInfo
       }));
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error uploading file:', error);
       Alert.alert('Error', 'Failed to upload file: ' + error.message);
     } finally {
@@ -167,7 +150,7 @@ const EnhancedChatRoom = () => {
           size: selectedAsset.fileSize || 0
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error selecting photo:', error);
       Alert.alert('Error', 'Failed to select photo: ' + error.message);
     }
@@ -195,7 +178,7 @@ const EnhancedChatRoom = () => {
           size: selectedAsset.fileSize || 0
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error capturing photo:', error);
       Alert.alert('Error', 'Failed to capture photo: ' + error.message);
     }
@@ -221,14 +204,14 @@ const EnhancedChatRoom = () => {
           size: file.size
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error selecting document:', error);
       Alert.alert('Error', 'Failed to select document: ' + error.message);
     }
   };
 
   // Function to handle attachment press/download
-  const handleAttachmentPress = async (attachment) => {
+  const handleAttachmentPress = async (attachment: FileAttachment) => {
     if (!currentRoom?.id || !attachment?.blobId) {
       Alert.alert('Error', 'Invalid attachment data');
       return;
@@ -267,7 +250,7 @@ const EnhancedChatRoom = () => {
   };
 
   // Function to render each message
-  const renderItem = ({ item }) => {
+  const renderItem = ({ item }: any) => {
     if (!item) return null;
 
     // If the message is a system message
@@ -280,7 +263,6 @@ const EnhancedChatRoom = () => {
 
     return (
       <Message
-        handleAttachmentPress={handleAttachmentPress}
         message={item}
         isOwnMessage={isOwnMessage}
         roomId={currentRoom?.id}
@@ -335,9 +317,9 @@ const EnhancedChatRoom = () => {
     >
       {currentRoom && (
         <RoomDetailsModal
+          room={currentRoom}
           visible={roomDetailsModalVisible}
           onClose={() => setRoomDetailsModalVisible(false)}
-          roomId={currentRoom.id}
         />
       )}
 

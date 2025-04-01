@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import { StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { COLORS } from '../../utils/constants';
@@ -100,7 +100,7 @@ const RoomHeader: React.FC<RoomHeaderProps> = ({ roomId, roomName }) => {
 
   return (
     <>
-      <Text style={styles.roomTitle}>#{roomName}</Text>
+
       <ShareRoomModal
         visible={shareModalVisible}
         onClose={() => setShareModalVisible(false)}

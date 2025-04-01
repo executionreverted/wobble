@@ -7,7 +7,7 @@ import RPC from 'bare-rpc';
 import bundle from '../app.bundle';
 import b4a from "b4a"
 import useUser from '../hooks/useUser';
-import { Room, Message } from '../types';
+import { FileAttachment, Room, Message } from '../types';
 import resetRegistry from './resetSystem';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createStableBlobId, getUTIForMimeType } from '../utils/helpers';
@@ -20,8 +20,7 @@ let updateMessages: ((messages: Message[], replace: boolean) => void) | undefine
 let onRoomCreated: ((room: Room) => void) | undefined = undefined;
 let onRoomJoined: ((room: Room) => void) | undefined = undefined;
 let onInviteGenerated: ((roomId: string, inviteCode: string) => void) | undefined = undefined;
-
-
+let onRoomFiles: ((room: any) => void) | undefined = undefined;
 interface FileDownloadState {
   progress: number;
   message: string;
@@ -95,7 +94,14 @@ export interface WorkletContextType {
   clearCache: () => Promise<void>;
   getCacheInfo: () => { size: number, files: number };
   isCacheInitialized: boolean;
-  cacheInitPromise: Promise<void>
+  cacheInitPromise: Promise<void>;
+  getRoomFiles: (roomId: string, options?: {
+    limit?: number,
+    before?: number
+  }) => Promise<{
+    files: FileAttachment[],
+    hasMore: boolean
+  }>;
 }
 
 export const WorkletContext = createContext<WorkletContextType>(undefined as any);
@@ -332,217 +338,34 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     }
   }, [rpcClient]);
 
+  const getRoomFiles = useCallback(async (roomId: string, options: any = {}) => {
+    if (!rpcClient) throw new Error('RPC client not initialized');
 
+    const { limit = 50, before } = options;
 
-
-
-
-  const addToCache = useCallback(async (cacheKey, fileData, fileName, mimeType, fileSize) => {
-    try {
-      // Create a unique filename to prevent collisions
-      const timestamp = Date.now();
-      const safeFileName = fileName.replace(/[^a-zA-Z0-9\._]/g, '_');
-      const filePath = `${CACHE_FILE_DIR}${timestamp}_${safeFileName}`;
-
-      // Save file to cache directory
-      await FileSystem.writeAsStringAsync(filePath, fileData, {
-        encoding: FileSystem.EncodingType.Base64
-      });
-
-      // Get actual file size if not provided
-      let actualSize = fileSize;
-      if (!actualSize) {
-        const fileInfo = await FileSystem.getInfoAsync(filePath);
-        actualSize = fileInfo.size || fileData.length * 0.75; // Approximation for base64
-      }
-
-      setCacheMetadata(prevMetadata => {
-        const newMetadata = {
-          ...prevMetadata,
-          [cacheKey]: {
-            fileName,
-            filePath,
-            size: actualSize,
-            timestamp,
-            mimeType
-          },
-
-          length: (prevMetadata.length || 0) + 1
-        };
-        console.log('UPDATEEEE', newMetadata)
-        saveCacheMetadata(newMetadata);
-        return newMetadata;
-      });
-
-      setCacheSize(prev => {
-        const newSize = prev + actualSize;
-
-        // Check cache size and clean if necessary
-        if (newSize > CACHE_MAX_SIZE) {
-          cleanCache();
-        }
-
-        return newSize;
-      });
-
-      return filePath;
-    } catch (error) {
-      console.error('Error adding file to cache:', error);
-      return null;
-    }
-  }, [cacheMetadata?.legth, cacheMetadata, cacheSize, saveCacheMetadata]);
-
-
-  const getFromCache = useCallback(async (cacheKey) => {
-    try {
-      const cachedItem = cacheMetadata[cacheKey];
-
-      // If no cached item found, return null
-      if (!cachedItem) {
-        console.log(`No cache entry found for key: ${cacheKey}`);
-        return null;
-      }
-
-      // Validate cached item
-      if (!cachedItem.filePath) {
-        console.warn(`Invalid cache entry for key ${cacheKey}: Missing file path`);
-
-        // Remove invalid entry from metadata
-        const newMetadata = { ...cacheMetadata };
-        delete newMetadata[cacheKey];
-
-        setCacheMetadata(newMetadata);
-        await saveCacheMetadata(newMetadata);
-
-        return null;
-      }
-
-      // Check file existence and integrity
-      let fileInfo;
+    return new Promise((resolve, reject) => {
       try {
-        fileInfo = await FileSystem.getInfoAsync(cachedItem.filePath);
-      } catch (fileCheckError) {
-        console.error(`Error checking file for ${cacheKey}:`, fileCheckError);
-        fileInfo = { exists: false };
-      }
+        const request = rpcClient.request('getRoomFiles');
+        request.send(JSON.stringify({ roomId, limit, before }));
 
-      // If file doesn't exist, clean up the metadata
-      if (!fileInfo.exists) {
-        console.log(`Cached file not found for key ${cacheKey}. Removing from cache.`);
-
-        const newMetadata = { ...cacheMetadata };
-        const removedItemSize = cachedItem.size || 0;
-
-        delete newMetadata[cacheKey];
-
-        // Update metadata and cache size
-        setCacheMetadata(newMetadata);
-        setCacheSize(prev => Math.max(0, prev - removedItemSize));
-
-        await saveCacheMetadata(newMetadata);
-
-        return null;
-      }
-
-      // Validate file size
-      if (fileInfo.size === 0) {
-        console.warn(`Empty file in cache for key ${cacheKey}`);
-        return null;
-      }
-
-      // Read file content
-      let fileData;
-      try {
-        fileData = await FileSystem.readAsStringAsync(cachedItem.filePath, {
-          encoding: FileSystem.EncodingType.Base64
+        // Set up a temporary callback
+        setCallbacks({
+          onRoomFiles: (data) => {
+            if (data.success) {
+              resolve({
+                files: data.files,
+                hasMore: data.hasMore
+              });
+            } else {
+              reject(new Error(data.error));
+            }
+          }
         });
-      } catch (readError) {
-        console.error(`Error reading cached file for ${cacheKey}:`, readError);
-        return null;
+      } catch (error) {
+        reject(error);
       }
-
-      // Validate file data
-      if (!fileData) {
-        console.warn(`Unable to read file data for ${cacheKey}`);
-        return null;
-      }
-
-      // Update timestamp to mark as recently used
-      const newMetadata = {
-        ...cacheMetadata,
-        [cacheKey]: {
-          ...cachedItem,
-          timestamp: Date.now()
-        }
-      };
-
-      setCacheMetadata(newMetadata);
-      await saveCacheMetadata(newMetadata);
-
-      return {
-        data: fileData,
-        mimeType: cachedItem.mimeType || 'application/octet-stream',
-        fileName: cachedItem.fileName || 'unknown_file',
-        path: cachedItem.filePath
-      };
-    } catch (error) {
-      console.error('Comprehensive error in getFromCache:', error);
-
-      // Attempt to remove problematic cache entry if possible
-      try {
-        const newMetadata = { ...cacheMetadata };
-        delete newMetadata[cacheKey];
-        setCacheMetadata(newMetadata);
-        await saveCacheMetadata(newMetadata);
-      } catch (cleanupError) {
-        console.error('Error during cache cleanup:', cleanupError);
-      }
-
-      return null;
-    }
-  }, [cacheMetadata, saveCacheMetadata]);
-
-
-
-
-
-  const cleanCache = useCallback(async () => {
-    try {
-      // Get all cached items sorted by timestamp (oldest first)
-      const items = Object.entries(cacheMetadata)
-        .map(([key, value]) => ({ key, ...value }))
-        .sort((a, b) => a.timestamp - b.timestamp);
-
-      let newSize = cacheSize;
-      const newMetadata = { ...cacheMetadata };
-
-      // Remove oldest files until we're under the limit
-      for (const item of items) {
-        if (newSize <= CACHE_MAX_SIZE * 0.8) break; // Stop when we've freed up 20%
-
-        try {
-          // Delete the file
-          await FileSystem.deleteAsync(item.filePath, { idempotent: true });
-
-          // Update metadata
-          delete newMetadata[item.key];
-          newSize -= item.size || 0;
-
-          console.log(`Removed ${item.fileName} from cache (${(item.size / (1024 * 1024)).toFixed(2)}MB)`);
-        } catch (err) {
-          console.error('Error removing file from cache:', err);
-        }
-      }
-
-      setCacheMetadata(newMetadata);
-      setCacheSize(newSize);
-      await saveCacheMetadata(newMetadata);
-
-      console.log(`Cache cleaned: ${(newSize / (1024 * 1024)).toFixed(2)}MB remaining`);
-    } catch (error) {
-      console.error('Error cleaning cache:', error);
-    }
-  }, [cacheMetadata, cacheSize, saveCacheMetadata]);
+    });
+  }, [rpcClient]);
 
   useEffect(() => {
     initializeCache();
@@ -1086,7 +909,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     updateMessages?: (messages: Message[], replace: boolean) => void,
     onRoomCreated?: (room: Room) => void,
     onRoomJoined?: (room: Room) => void,
-    onInviteGenerated?: (roomId: string, inviteCode: string) => void // Add this
+    onInviteGenerated?: (roomId: string, inviteCode: string) => void,
+    onRoomFiles?: (roomId: string) => void
   }) => {
     console.log('Setting callbacks in WorkletContext:', callbacks);
 
@@ -1115,6 +939,11 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     if (callbacks.onInviteGenerated) {
       onInviteGenerated = callbacks.onInviteGenerated;
       console.log('onInviteGenerated callback set successfully');
+    }
+
+    if (callbacks.onRoomFiles) {
+      onRoomFiles = callbacks.onRoomFiles;
+      console.log('onRoomFiles callback set successfully');
     }
   }, []);
 
@@ -1558,7 +1387,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       getCacheInfo,
       isCacheInitialized,
       cacheInitPromise: cacheInitPromise.current,
-      saveFileToDevice
+      saveFileToDevice,
+      getRoomFiles
     }
   ), [
     worklet,
