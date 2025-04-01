@@ -753,28 +753,48 @@ class RoomBase extends ReadyResource {
 
   async getFiles(directory = '/', options = {}) {
     try {
-      // Use promise-based stream processing
+      const messageStream = this.base.view.find('@roombase/messages', {
+        hasAttachments: true
+      }, {});
+
       const files = await new Promise((resolve, reject) => {
         const fileList = [];
 
-        const messageStream = this.base.view.find('@roombase/messages', {
-          hasAttachments: true
-        }, {});
-
         messageStream.on('data', (msg) => {
           try {
+            // Ensure attachments is parsed correctly
+            let attachments = [];
             if (msg.attachments) {
-              const attachmentsParsed = JSON.parse(msg.attachments);
-              for (const attachment of attachmentsParsed) {
-                fileList.push({
-                  ...attachment,
-                  sender: msg.sender,
-                  timestamp: attachment.timestamp || msg.timestamp
-                });
+              // Try multiple parsing methods
+              if (typeof msg.attachments === 'string') {
+                try {
+                  attachments = JSON.parse(msg.attachments);
+                } catch (jsonErr) {
+                  try {
+                    // If first parse fails, try parsing the parsed result
+                    attachments = JSON.parse(JSON.parse(msg.attachments));
+                  } catch (nestedErr) {
+                    console.error('Failed to parse attachments:', msg.attachments);
+                    return; // Skip this message
+                  }
+                }
+              } else if (Array.isArray(msg.attachments)) {
+                attachments = msg.attachments;
               }
+
+              // Ensure each attachment has the necessary properties
+              const validAttachments = attachments.filter(attachment =>
+                attachment && typeof attachment === 'object' && attachment.name
+              ).map(attachment => ({
+                ...attachment,
+                sender: msg.sender,
+                timestamp: attachment.timestamp || msg.timestamp
+              }));
+
+              fileList.push(...validAttachments);
             }
           } catch (parseErr) {
-            console.error('Error parsing attachments:', parseErr);
+            console.error('Error parsing message attachments:', parseErr);
           }
         });
 

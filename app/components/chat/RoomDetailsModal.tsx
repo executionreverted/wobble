@@ -29,6 +29,22 @@ const RoomDetailsModal = ({
   // Fetch files when modal opens
   useEffect(() => {
     if (visible && room && activeSection === 'files') {
+      setCallbacks({
+        onRoomFiles: (data: any) => {
+          console.log('Room files received:', data);
+
+          if (data.success) {
+            setFiles(prev =>
+              prev.length && data.before
+                ? [...prev, ...data.files]
+                : data.files
+            );
+            setHasMore(data.hasMore);
+          } else {
+            console.error('Failed to fetch room files:', data.error);
+          }
+        }
+      });
       fetchFiles();
     }
     if (!visible) {
@@ -45,24 +61,6 @@ const RoomDetailsModal = ({
     try {
       // Use a promise to handle the RPC callback
       const filePromise = new Promise<{ files: FileAttachment[], hasMore: boolean }>((resolve, reject) => {
-        // Set up a temporary callback to handle room files response
-        const callback = (data: any) => {
-          if (data.success) {
-            resolve({
-              files: data.files,
-              hasMore: data.hasMore
-            });
-          } else {
-            reject(new Error(data.error || 'Failed to fetch room files'));
-          }
-        };
-
-        // Set the callback
-        setCallbacks({
-          onRoomFiles: callback
-        });
-
-        // Send the request to get room files
         const request = rpcClient.request('getRoomFiles');
         request.send(JSON.stringify({
           roomId: room.id,
@@ -131,8 +129,14 @@ const RoomDetailsModal = ({
   };
 
   const renderFileItem = ({ item }: any) => {
+    // Add additional type checking and default values
+    const fileName = item.name || 'Unknown File';
+    const fileSize = item.size || 0;
     const isOwnFile = user && item.sender === user.name;
-    const FileIcon = getFileIcon(item.name);
+
+    console.log('Rendering file item:', item); // Debug log
+
+    const FileIcon = getFileIcon(fileName);
 
     return (
       <TouchableOpacity
@@ -142,10 +146,7 @@ const RoomDetailsModal = ({
         ]}
       >
         <View style={styles.fileIconContainer}>
-          <FileIcon
-            size={24}
-            color={isOwnFile ? COLORS.primary : COLORS.textSecondary}
-          />
+          {FileIcon}
           {isOwnFile && (
             <View style={styles.ownFileBadge}>
               <MaterialIcons name="person" size={14} color={COLORS.primary} />
@@ -157,11 +158,11 @@ const RoomDetailsModal = ({
             style={styles.fileName}
             numberOfLines={1}
           >
-            {item.name}
+            {fileName}
           </Text>
           <View style={styles.fileMetadata}>
             <Text style={styles.fileMetadataText}>
-              {formatFileSize(item.size)}
+              {formatFileSize(fileSize)}
             </Text>
             <Text style={styles.fileMetadataText}>
               {formatTimestamp(item.timestamp)}
@@ -171,16 +172,9 @@ const RoomDetailsModal = ({
             </Text>
           </View>
         </View>
-        <TouchableOpacity
-          style={styles.downloadButton}
-        // TODO: Add download functionality
-        >
-          <MaterialIcons name="download" size={14} color={COLORS.primary} />
-        </TouchableOpacity>
       </TouchableOpacity>
     );
   };
-
   const EmptyState = () => (
     <View style={styles.emptyContainer}>
       <MaterialIcons name="attachment" size={32} color={COLORS.primary} />
