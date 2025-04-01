@@ -449,7 +449,7 @@ class RoomBase extends ReadyResource {
       return room.messageCount || 1;
     } catch (err) {
       console.error('Error getting message count:', err);
-      return 1;
+      return 0;
     }
   }
 
@@ -765,7 +765,7 @@ class RoomBase extends ReadyResource {
                 } catch (jsonErr) {
                   try {
                     // If first parse fails, try parsing the parsed result
-                    attachments = JSON.parse(JSON.parse(msg.attachments));
+                    attachments = JSON.parse(msg.attachments);
                   } catch (nestedErr) {
                     console.error('Failed to parse attachments:', msg.attachments);
                     return; // Skip this message
@@ -774,7 +774,11 @@ class RoomBase extends ReadyResource {
               } else if (Array.isArray(msg.attachments)) {
                 attachments = msg.attachments;
               }
+              console.log(attachments)
 
+              if (typeof msg.attachments === 'string') {
+                attachments = JSON.parse(attachments)
+              }
               // Ensure each attachment has the necessary properties
               const validAttachments = attachments.filter(attachment =>
                 attachment && typeof attachment === 'object' && attachment.name
@@ -815,10 +819,7 @@ class RoomBase extends ReadyResource {
       timeout = 60000,
       onProgress,
       preview = false,
-      platformOS,
-      signal,  // AbortSignal for cancellation
-      onSwarmCreated, // Callback for swarm creation
-      onCoreCreated   // Callback for core creation
+      platformOS
     } = options;
 
     let blobRef = file;
@@ -832,17 +833,11 @@ class RoomBase extends ReadyResource {
         outputPath,
         blobRef,
         platformOS,
-        preview,
-        hasSignal: !!signal
+        preview
       });
 
-      // Check for cancellation before starting
-      if (signal && signal.aborted) {
-        throw new Error('Download cancelled before starting');
-      }
-
       // Ensure output directory exists
-      const outputDir = path.dirname(outputPath);
+      const outputDir = Path.dirname(outputPath);
       if (!fs.existsSync(outputDir)) {
         fs.mkdirSync(outputDir, { recursive: true });
       }
@@ -850,11 +845,6 @@ class RoomBase extends ReadyResource {
       // Create temp directory
       if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir, { recursive: true });
-      }
-
-      // Check for cancellation before checking local blob
-      if (signal && signal.aborted) {
-        throw new Error('Download cancelled before blob check');
       }
 
       // Check if this is our own blob store first
@@ -887,11 +877,6 @@ class RoomBase extends ReadyResource {
         }
       }
 
-      // Check for cancellation before proceeding to remote download
-      if (signal && signal.aborted) {
-        throw new Error('Download cancelled before remote setup');
-      }
-
       // Prepare core key
       const coreKey = typeof blobRef.coreKey === 'string'
         ? b4a.from(blobRef.coreKey, 'hex')
@@ -901,29 +886,12 @@ class RoomBase extends ReadyResource {
       remoteCore = new Hypercore(tempDir, coreKey, { wait: true });
       if (onProgress) onProgress(10, "Connected to core");
 
-      // Notify caller about the core creation
-      if (onCoreCreated) onCoreCreated(remoteCore);
-
       await remoteCore.ready();
       if (onProgress) onProgress(20, "Core ready");
 
-      // Check for cancellation after core is ready
-      if (signal && signal.aborted) {
-        throw new Error('Download cancelled after core ready');
-      }
-
       localSwarm = new Hyperswarm();
-
-      // Notify caller about the swarm creation
-      if (onSwarmCreated) onSwarmCreated(localSwarm);
-
       topic = await localSwarm.join(coreKey);
       if (onProgress) onProgress(30, "Joined swarm");
-
-      // Check for cancellation after joining swarm
-      if (signal && signal.aborted) {
-        throw new Error('Download cancelled after joining swarm');
-      }
 
       // Set up replication
       localSwarm.on('connection', (conn) => {
@@ -931,42 +899,14 @@ class RoomBase extends ReadyResource {
         if (onProgress) onProgress(40, "Replication started");
       });
 
-      // Wait for peers with cancellation support
-      const peerWaitPromise = new Promise((resolve, reject) => {
-        const peerTimeout = setTimeout(() => resolve(), 3000);
-
-        // Set up cancellation handler
-        if (signal) {
-          signal.addEventListener('abort', () => {
-            clearTimeout(peerTimeout);
-            reject(new Error('Download cancelled during peer wait'));
-          }, { once: true });
-        }
-      });
-
-      try {
-        await peerWaitPromise;
-      } catch (waitError) {
-        // This will be caught by the main try/catch if it's a cancellation
-        throw waitError;
-      }
-
-      // Check for cancellation before updating
-      if (signal && signal.aborted) {
-        throw new Error('Download cancelled before core update');
-      }
-
+      // Wait for peers
+      await new Promise(resolve => setTimeout(resolve, 3000));
       await remoteCore.update({ wait: true });
 
       // Create hyperblobs for streaming
       const remoteBlobs = new Hyperblobs(remoteCore);
       await remoteBlobs.ready();
-      if (onProgress) onProgress(30, "Hyperblob ready");
-
-      // Check for cancellation after hyperblobs is ready
-      if (signal && signal.aborted) {
-        throw new Error('Download cancelled after hyperblob ready');
-      }
+      if (onProgress) onProgress(50, "Hyperblob ready");
 
       // Get the blob ID
       const blobId = typeof blobRef.blobId === 'object'
@@ -981,18 +921,8 @@ class RoomBase extends ReadyResource {
       // Create read stream from hyperblobs
       const readStream = remoteBlobs.createReadStream(blobId);
 
-      // Stream the file directly to disk with cancellation support
+      // Stream the file directly to disk
       await new Promise((resolve, reject) => {
-        // Set up cancellation handler
-        if (signal) {
-          signal.addEventListener('abort', () => {
-            // Clean up the streams
-            readStream.destroy();
-            writeStream.end();
-            reject(new Error('Download cancelled during streaming'));
-          }, { once: true });
-        }
-
         readStream.on('data', chunk => {
           writeStream.write(chunk);
           bytesWritten += chunk.length;
@@ -1040,8 +970,7 @@ class RoomBase extends ReadyResource {
         message: err.message,
         stack: err.stack,
         blobRef,
-        outputPath,
-        isCancelled: signal?.aborted
+        outputPath
       });
 
       // Cleanup on error
@@ -1057,6 +986,7 @@ class RoomBase extends ReadyResource {
       throw err;
     }
   }
+
 
 
 
