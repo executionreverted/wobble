@@ -12,12 +12,12 @@ import {
   StatusBar
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { Video, ResizeMode } from 'expo-av';
+import { useVideoPlayer, VideoView } from "expo-video"
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { Image } from 'expo-image';
 import { Audio } from 'expo-av';
 import { COLORS } from '../../utils/constants';
-import FileCacheManager from '../../utils/FileCacheManager';
+import { useEvent } from 'expo';
 
 interface MediaPlayerModalProps {
   visible: boolean;
@@ -39,12 +39,18 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const videoRef = useRef<Video>(null);
+  const videoRef = useRef<VideoView>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const [position, setPosition] = useState(0);
   const [isLandscape, setIsLandscape] = useState(false);
+  const player = useVideoPlayer(filePath, player_ => {
+    setIsLoading(false)
+    player_.loop = true
+  });
+
+  const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
+
   // Clean up when modal closes
   useEffect(() => {
     if (!visible) {
@@ -65,7 +71,6 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
       // Reset other state
       setIsLoading(true);
       setError(null);
-      setIsPlaying(false);
     }
   }, [visible]);
 
@@ -165,7 +170,6 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
     if (status.isLoaded) {
       setDuration(status.durationMillis || 0);
       setPosition(status.positionMillis || 0);
-      setIsPlaying(status.isPlaying);
     } else if (status.error) {
       console.log('Audio playback error:', status.error);
       setError(`Playback error: ${status.error}`);
@@ -200,15 +204,8 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
   const getMediaType = (): 'video' | 'image' | 'audio' | 'other' => {
     if (!filePath) return 'other';
 
-    if (fileType) {
-      if (fileType.startsWith('video/')) return 'video';
-      if (fileType.startsWith('image/')) return 'image';
-      if (fileType.startsWith('audio/')) return 'audio';
-    }
-
-    // Fallback to file extension check
     const ext = filePath.split('.').pop()?.toLowerCase() || '';
-
+    console.log({ ext })
     if (['mp4', 'mov', 'avi', 'webm', 'mkv'].includes(ext)) return 'video';
     if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].includes(ext)) return 'image';
     if (['mp3', 'wav', 'ogg', 'm4a', 'aac'].includes(ext)) return 'audio';
@@ -237,7 +234,7 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
   // Render different content based on media type
   const renderMediaContent = () => {
     const mediaType = getMediaType();
-
+    console.log(mediaType)
     if (!filePath) {
       return (
         <View style={styles.errorContainer}>
@@ -259,35 +256,16 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
       case 'video':
         return (
           <View style={[styles.videoContainer, isLandscape && styles.fullscreenVideo]}>
-            <Video
+            <VideoView
+              nativeControls
+              player={player}
               ref={videoRef}
-              source={{ uri: filePath }}
               style={styles.video}
-              resizeMode={isFullscreen ? ResizeMode.CONTAIN : ResizeMode.CONTAIN}
-              useNativeControls
-
-              isLooping
-              onLoad={() => setIsLoading(false)}
-              onError={(error) => {
-                console.log('Video error:', error);
-                setError('Failed to load video');
-                setIsLoading(false);
-              }}
             />
-
-            {!isFullscreen && (
-              <TouchableOpacity
-                style={styles.fullscreenButton}
-                onPress={handleToggleFullscreen}
-              >
-                <MaterialIcons name="fullscreen" size={24} color="#FFF" />
-              </TouchableOpacity>
-            )}
           </View>
         );
 
       case 'image':
-        console.log('IMAGEEGEGE')
         return (
           <View style={styles.imageContainer}>
             {isLoading && (
@@ -397,7 +375,26 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
           {
             renderMediaContent()
           }
+          {
+            getMediaType() == 'video' && <TouchableOpacity
+              style={styles.playPauseButton}
+              disabled={isLoading}
+              onPress={() => {
+                if (isPlaying) {
+                  player.pause();
+                } else {
+                  player.play();
+                }
+              }}
+            >
+              <MaterialIcons
+                name={isPlaying ? "pause" : "play-arrow"}
+                size={36}
+                color={COLORS.textPrimary}
+              />
+            </TouchableOpacity>
 
+          }
         </View>
 
         {/* Footer (only in portrait mode) */}
@@ -504,6 +501,8 @@ const styles = StyleSheet.create({
   },
   video: {
     flex: 1,
+    width: "100%",
+    height: "100%"
   },
   fullscreenButton: {
     position: 'absolute',
@@ -600,6 +599,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   playPauseButton: {
+    marginTop: 16,
     width: 60,
     height: 60,
     borderRadius: 30,
