@@ -2,7 +2,7 @@
 
 import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import { getUTIForMimeType, createStableBlobId } from './helpers';
@@ -409,153 +409,144 @@ export class FileCacheManager {
   }
 
   // Save file to device's downloads (Android) or share (iOS)
+
   async saveToDevice(path: string, fileName: string, mimeType: string): Promise<boolean> {
     try {
       console.log(`Attempting to save file: ${fileName} from path: ${path}`);
 
-      // Verify file exists first to avoid crashes
-      const fileInfo = await FileSystem.getInfoAsync(path);
-      if (!fileInfo.exists) {
-        console.error(`File does not exist at path: ${path}`);
+      // Verify file exists first with proper path handling
+      let validPath = path;
+      let fileExists = false;
 
-        // If on Android, check if path needs file:// prefix
-        if (Platform.OS === 'android' && !path.startsWith('file://')) {
-          const altPath = `file://${path}`;
-          console.log(`Trying alternative path: ${altPath}`);
+      // Try different path formats (with and without file:// prefix)
+      const pathsToTry = [
+        path,
+        path.startsWith('file://') ? path.substring(7) : `file://${path}`
+      ];
 
-          try {
-            const altInfo = await FileSystem.getInfoAsync(altPath);
-            if (altInfo.exists) {
-              path = altPath;
-            } else {
-              return false;
-            }
-          } catch (altCheckError) {
-            console.error('Error checking alternative path:', altCheckError);
-            return false;
+      for (const testPath of pathsToTry) {
+        try {
+          const fileInfo = await FileSystem.getInfoAsync(testPath);
+          if (fileInfo.exists && fileInfo.size > 0) {
+            validPath = testPath;
+            fileExists = true;
+            console.log(`Found valid file at: ${validPath}, size: ${fileInfo.size}`);
+            break;
           }
-        } else {
-          return false;
+        } catch (pathError) {
+          console.log(`Error checking path ${testPath}:`, pathError.message);
         }
       }
 
-      if (Platform.OS === 'ios') {
-        // On iOS, use the sharing API
-        if (await Sharing.isAvailableAsync()) {
-          await Sharing.shareAsync(path, {
-            mimeType,
-            dialogTitle: `Share ${fileName}`,
-            UTI: getUTIForMimeType(mimeType)
-          });
-          return true;
-        }
+      if (!fileExists) {
+        console.error('File does not exist or is invalid');
         return false;
-      } else if (Platform.OS === 'android') {
-        // For Android, try multiple approaches
+      }
 
-        // First: For images and videos, save to media library
-        if (FileCacheManager.isImageFile(fileName) ||
-          fileName.toLowerCase().endsWith('.mp4') ||
-          fileName.toLowerCase().endsWith('.mp3')) {
-          try {
-            const { status } = await MediaLibrary.requestPermissionsAsync();
-            if (status === 'granted') {
-              console.log(`Saving media file to library: ${path}`);
-              const asset = await MediaLibrary.createAssetAsync(path);
-              const album = await MediaLibrary.getAlbumAsync('Roombase');
+      // Handle by file type
+      const isVideo = fileName.match(/\.(mp4|mov|avi|mkv|webm)$/i);
+      const isImage = FileCacheManager.isImageFile(fileName);
+      const isAudio = fileName.match(/\.(mp3|wav|ogg|m4a)$/i);
 
-              if (album) {
-                await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
-              } else {
-                await MediaLibrary.createAlbumAsync('Roombase', asset, false);
-              }
-
-              Alert.alert(
-                "File Saved",
-                `${fileName} has been saved to your Media Library in the Roombase album`
-              );
-              return true;
-            }
-          } catch (mediaError) {
-            console.error('Media library error:', mediaError);
-          }
-        }
-
-        // Second: Try with SAF
+      if (Platform.OS === 'android' && (isVideo || isImage || isAudio)) {
         try {
-          console.log('Attempting to save with Storage Access Framework');
+          // Get MediaLibrary permission
+          const { status } = await MediaLibrary.requestPermissionsAsync();
+          if (status === 'granted') {
+            // Ensure the path is in the correct format
+            const assetPath = validPath.startsWith('file://') ? validPath : `file://${validPath}`;
+
+            console.log(`Creating media library asset at: ${assetPath}`);
+            const asset = await MediaLibrary.createAssetAsync(assetPath);
+
+            if (!asset) {
+              throw new Error('Failed to create asset');
+            }
+
+            // Save to appropriate album
+            let album = await MediaLibrary.getAlbumAsync('Roombase');
+            if (!album) {
+              album = await MediaLibrary.createAlbumAsync('Roombase', asset, false);
+            } else {
+              await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+            }
+
+            // Show success based on media type
+            const mediaType = isVideo ? 'video' : isImage ? 'image' : 'audio';
+            Alert.alert(
+              "File Saved",
+              `${fileName} has been saved to your Media Library in the Roombase album. You can access it from your Gallery/Photos app.`
+            );
+            return true;
+          } else {
+            throw new Error('Media Library permission denied');
+          }
+        } catch (mediaError) {
+          console.error('Media library error:', mediaError);
+          // Fall through to other methods
+        }
+      }
+
+      // For Android, try with Storage Access Framework if media library fails
+      if (Platform.OS === 'android') {
+        try {
           const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
           if (permissions.granted) {
-            try {
-              const destinationUri = await FileSystem.StorageAccessFramework.createFileAsync(
-                permissions.directoryUri,
-                fileName,
-                mimeType
-              );
+            // Create the file in the selected location
+            const destinationUri = await FileSystem.StorageAccessFramework.createFileAsync(
+              permissions.directoryUri,
+              fileName,
+              mimeType
+            );
 
-              // Read file content
-              const fileContent = await FileSystem.readAsStringAsync(path, {
+            // Prepare the content
+            let fileContent;
+            try {
+              fileContent = await FileSystem.readAsStringAsync(validPath, {
                 encoding: FileSystem.EncodingType.Base64
               });
-
-              // Write to destination
-              await FileSystem.StorageAccessFramework.writeAsStringAsync(
-                destinationUri,
-                fileContent,
-                { encoding: FileSystem.EncodingType.Base64 }
-              );
-
-              Alert.alert(
-                "File Saved",
-                `${fileName} has been saved to your selected location`
-              );
-              return true;
-            } catch (safWriteError) {
-              console.error('Error writing with SAF:', safWriteError);
+            } catch (readError) {
+              console.error('Error reading file for SAF:', readError);
+              return false;
             }
+
+            // Write to destination
+            await FileSystem.StorageAccessFramework.writeAsStringAsync(
+              destinationUri,
+              fileContent,
+              { encoding: FileSystem.EncodingType.Base64 }
+            );
+
+            Alert.alert(
+              "File Saved",
+              `${fileName} has been saved to your selected location`
+            );
+            return true;
           }
         } catch (safError) {
           console.error('SAF error:', safError);
         }
-
-        // Final approach: Use sharing intent
-        try {
-          console.log('Attempting to share file:', path);
-          if (await Sharing.isAvailableAsync()) {
-            // Make sure to append file:// if it's missing and required on this device
-            let sharePath = path;
-            if (!path.startsWith('file://') && !path.startsWith('content://')) {
-              sharePath = `file://${path}`;
-            }
-
-            await Sharing.shareAsync(sharePath, {
-              mimeType: mimeType || 'application/octet-stream',
-              dialogTitle: `Save ${fileName}`,
-              UTI: 'public.data'
-            });
-            return true;
-          }
-        } catch (shareError) {
-          console.error('Share error:', shareError);
-
-          // Last resort: Alert user where the file is
-          if (path.includes('/storage/emulated')) {
-            Alert.alert(
-              "File Location",
-              `The file is available at: ${path.replace('/storage/emulated/0', 'Internal Storage')}`
-            );
-            return true;
-          }
-        }
-
-        return false;
       }
+
+      // Fall back to sharing intent
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(validPath, {
+          mimeType: mimeType || 'application/octet-stream',
+          dialogTitle: `Save ${fileName}`
+        });
+        return true;
+      }
+
       return false;
     } catch (error) {
       console.error(`Error saving file ${fileName} to device:`, error);
       return false;
     }
-  }  // Share file using system share dialog
+  }
+
+
+
+  // Share file using system share dialog
   async shareFile(path: string, mimeType: string): Promise<boolean> {
     try {
       if (await Sharing.isAvailableAsync()) {

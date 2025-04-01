@@ -1281,8 +1281,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
   }, [updateFileDownload]);
 
 
-  // Helper function to save file on mobile
-  // In WorkletContext.tsx, modify saveFileToDevice:
+
   const saveFileToDevice = async (downloadKey: string): Promise<boolean> => {
     const downloadData = fileDownloads[downloadKey];
 
@@ -1292,28 +1291,100 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     }
 
     try {
-      // If we have a path, use it directly
+      // If we have a path, validate it thoroughly before proceeding
       if (downloadData.path) {
-        // For large files that might not have data in state, but have a path
-        console.log(`Using file path directly: ${downloadData.path}`);
+        console.log(`Using file path: ${downloadData.path}`);
 
-        // Get file info to confirm it exists and has size
-        const fileInfo = await FileSystem.getInfoAsync(downloadData.path);
-        if (!fileInfo.exists || fileInfo.size === 0) {
-          console.error('File path exists but file is invalid');
+        // Check file validity with multiple path formats
+        let validPath = downloadData.path;
+        let isValid = false;
+
+        const pathsToCheck = [
+          downloadData.path,
+          downloadData.path.startsWith('file://') ?
+            downloadData.path : `file://${downloadData.path}`,
+          // For Android, try without file:// if it has it
+          downloadData.path.startsWith('file://') ?
+            downloadData.path.substring(7) : downloadData.path
+        ];
+
+        for (const testPath of pathsToCheck) {
+          try {
+            const info = await FileSystem.getInfoAsync(testPath);
+            if (info.exists && info.size > 0) {
+              validPath = testPath;
+              isValid = true;
+              console.log(`Validated file at ${validPath} with size ${info.size}`);
+              break;
+            } else {
+              console.log(`Path exists but invalid: ${testPath}`);
+            }
+          } catch (e) {
+            console.log(`Path check failed for ${testPath}:`, e.message);
+          }
+        }
+
+        if (!isValid) {
+          console.error('File is invalid or cannot be accessed');
+
+          // Try to get from cache as fallback
+          const cacheData = await fileCacheManager.getFile(downloadKey);
+          if (cacheData && cacheData.path) {
+            return await fileCacheManager.saveToDevice(
+              cacheData.path,
+              downloadData.fileName || 'download.file',
+              downloadData.mimeType || 'application/octet-stream'
+            );
+          }
+
           return false;
         }
 
-        // For images and videos, try media library first
+        // Handle videos, images, and audio files differently on Android
+        const isVideo = (downloadData.fileName || '').match(/\.(mp4|mov|avi|mkv|webm)$/i);
         const isImage = FileCacheManager.isImageFile(downloadData.fileName || '');
-        if (isImage) {
-          const saved = await fileCacheManager.saveToMediaLibrary(downloadData.path);
-          if (saved) return true;
+        const isAudio = (downloadData.fileName || '').match(/\.(mp3|wav|ogg|m4a)$/i);
+
+        if (Platform.OS === 'android' && (isVideo || isImage || isAudio)) {
+          try {
+            // Get MediaLibrary permission
+            const { status } = await MediaLibrary.requestPermissionsAsync();
+            if (status === 'granted') {
+              // Ensure the path is in the correct format for MediaLibrary
+              const assetPath = validPath.startsWith('file://') ? validPath : `file://${validPath}`;
+
+              console.log(`Creating media library asset at: ${assetPath}`);
+              const asset = await MediaLibrary.createAssetAsync(assetPath);
+
+              if (!asset) {
+                throw new Error('Failed to create asset');
+              }
+
+              // Save to appropriate album
+              let album = await MediaLibrary.getAlbumAsync('Roombase');
+              if (!album) {
+                album = await MediaLibrary.createAlbumAsync('Roombase', asset, false);
+              } else {
+                await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+              }
+
+              // Show success message
+              const mediaType = isVideo ? 'video' : isImage ? 'image' : 'audio';
+              Alert.alert(
+                "File Saved",
+                `${downloadData.fileName} has been saved to your Media Library in the Roombase album. You can access it from your Gallery app.`
+              );
+              return true;
+            }
+          } catch (mediaError) {
+            console.error('Media library error:', mediaError);
+            // Fall through to other methods
+          }
         }
 
-        // For all files, try device storage
+        // For all other files or if media library fails, use generic save
         return await fileCacheManager.saveToDevice(
-          downloadData.path,
+          validPath,
           downloadData.fileName || 'download.file',
           downloadData.mimeType || 'application/octet-stream'
         );
@@ -1354,6 +1425,12 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       return false;
     }
   };
+
+
+
+
+
+
   // Modify the clearCache function 
   const clearCache = useCallback(async () => {
     await fileCacheManager.clearCache();
