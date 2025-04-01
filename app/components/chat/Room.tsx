@@ -23,6 +23,7 @@ import useUser from '../../hooks/useUser';
 import useWorklet from '../../hooks/useWorklet';
 import RoomHeader from './RoomHeader';
 import { selectImage, takePhoto } from '../../utils/permissionHelpers';
+import RoomDetailsModal from './RoomDetailsModal';
 
 const EnhancedChatRoom = () => {
   const { currentRoom, messages, sendMessage, loadMoreMessages } = useChat();
@@ -37,6 +38,7 @@ const EnhancedChatRoom = () => {
   const insets = useSafeAreaInsets();
   const flatListRef = useRef(null);
   const [showAttachmentOptions, setShowAttachmentOptions] = useState(false);
+  const [roomDetailsModalVisible, setRoomDetailsModalVisible] = useState(false);
 
   // Handle text input content size change
   const handleContentSizeChange = (event) => {
@@ -50,6 +52,34 @@ const EnhancedChatRoom = () => {
   const toggleAttachmentOptions = () => {
     setShowAttachmentOptions(prev => !prev);
   };
+
+  useEffect(() => {
+    if (currentRoom) {
+      navigation.setOptions({
+        headerTitle: () => (
+          <TouchableOpacity
+            onPress={() => setRoomDetailsModalVisible(true)}
+            style={styles.headerTitleContainer}
+          >
+            <Text style={styles.headerTitle}>#{currentRoom.name}</Text>
+            <MaterialIcons name="keyboard-arrow-down" size={20} color={COLORS.textPrimary} />
+          </TouchableOpacity>
+        ),
+        headerRight: () => (
+          <TouchableOpacity
+            style={styles.shareButton}
+            onPress={() => {
+              // You can implement share functionality or leave it to RoomHeader
+              // This is just a placeholder
+              Alert.alert('Share', 'Share room feature would open here');
+            }}
+          >
+            <MaterialIcons name="share" size={24} color={COLORS.textPrimary} />
+          </TouchableOpacity>
+        )
+      });
+    }
+  }, [currentRoom, navigation]);
 
   // Add keyboard listeners to track keyboard visibility
   useEffect(() => {
@@ -68,17 +98,17 @@ const EnhancedChatRoom = () => {
     };
   }, []);
 
-  // Set room header with sharing functionality
-  useEffect(() => {
-    if (currentRoom) {
-      // Add the RoomHeader component to provide share functionality
-      navigation.setOptions({
-        headerTitle: () => (
-          <RoomHeader roomId={currentRoom.id} roomName={currentRoom.name} />
-        )
-      });
-    }
-  }, [currentRoom, navigation]);
+  // // Set room header with sharing functionality
+  // useEffect(() => {
+  //   if (currentRoom) {
+  //     // Add the RoomHeader component to provide share functionality
+  //     navigation.setOptions({
+  //       headerTitle: () => (
+  //         <RoomHeader roomId={currentRoom.id} roomName={currentRoom.name} />
+  //       )
+  //     });
+  //   }
+  // }, [currentRoom, navigation]);
 
   // Function to handle sending a message
   const handleSendMessage = async () => {
@@ -303,6 +333,14 @@ const EnhancedChatRoom = () => {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
+      {currentRoom && (
+        <RoomDetailsModal
+          visible={roomDetailsModalVisible}
+          onClose={() => setRoomDetailsModalVisible(false)}
+          roomId={currentRoom.id}
+        />
+      )}
+
       {isUploading && (
         <View style={styles.uploadingOverlay}>
           <View style={styles.uploadingContainer}>
@@ -535,7 +573,25 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 16,
     color: COLORS.textPrimary
-  }
+  },
+  headerTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)', // Slightly highlight to indicate it's tappable
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: COLORS.textPrimary,
+    marginRight: 4,
+  },
+  shareButton: {
+    padding: 10,
+    borderRadius: 8,
+  },
 });
 
 export default EnhancedChatRoom;
