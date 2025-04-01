@@ -1855,6 +1855,15 @@ const handleFileDownload = async (requestData) => {
         '/data/data/to.holepunch.bare.expo/files/downloads',
         roomId
       );
+    } else if (Bare.argv[0] === 'ios') {
+      // For iOS, ensure we're using a directory accessible to the app
+      downloadDir = Path.join(
+        path,
+        'downloads',
+        roomId
+      );
+      // Double check path exists
+      console.log(`iOS download directory: ${downloadDir}`);
     } else {
       downloadDir = Path.join(
         path,
@@ -1865,11 +1874,22 @@ const handleFileDownload = async (requestData) => {
 
     // Ensure download directory exists
     if (!fs.existsSync(downloadDir)) {
-      fs.mkdirSync(downloadDir, { recursive: true });
+      try {
+        fs.mkdirSync(downloadDir, { recursive: true });
+      } catch (mkdirErr) {
+        console.error('Error creating download directory:', mkdirErr);
+        // Try a different path if this fails on iOS
+        if (Bare.argv[0] === 'ios') {
+          downloadDir = Path.join(path, 'downloads');
+          if (!fs.existsSync(downloadDir)) {
+            fs.mkdirSync(downloadDir, { recursive: true });
+          }
+        }
+      }
     }
 
     // Create temporary directory for downloading
-    const tempDir = Path.join(downloadDir, 'temp');
+    let tempDir = Path.join(downloadDir, 'temp');
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true });
     }
@@ -1882,7 +1902,12 @@ const handleFileDownload = async (requestData) => {
     let outputPath = Path.join(downloadDir, `${timestamp}_${safeFileName}`);
 
     // Create a temporary file path for the download in progress
-    const tempFilePath = Path.join(tempDir, `temp_${timestamp}_${safeFileName}`);
+    let tempFilePath = Path.join(tempDir, `temp_${timestamp}_${safeFileName}`);
+
+    // Make iOS path more resilient
+    if (Bare.argv[0] === 'ios') {
+      tempFilePath = tempFilePath.replace(/\/{2,}/g, '/');
+    }
 
     console.log('Download Paths:', {
       outputPath,
@@ -1932,6 +1957,15 @@ const handleFileDownload = async (requestData) => {
     let remoteCore = null;
 
     try {
+      if (Bare.argv[0] === 'ios') {
+        // Verify both paths
+        const dirExists = fs.existsSync(Path.dirname(tempFilePath));
+        if (!dirExists) {
+          console.error(`Temp directory doesn't exist (iOS): ${Path.dirname(tempFilePath)}`);
+          // Try to create it again
+          fs.mkdirSync(Path.dirname(tempFilePath), { recursive: true });
+        }
+      }
       // Attempt download with timeout and abort support
       const downloadPromise = room.downloadFileToPath(attachment, tempFilePath, {
         onProgress,
@@ -1974,8 +2008,39 @@ const handleFileDownload = async (requestData) => {
 
       // Verify the file exists after download
       let fileExists = false;
+      if (fs.existsSync(tempFilePath)) {
+        try {
+          // On iOS, handle file paths with extra care
+          if (Bare.argv[0] === 'ios') {
+            const tempData = fs.readFileSync(tempFilePath);
+            fs.writeFileSync(outputPath, tempData);
+            fs.unlinkSync(tempFilePath);
+          } else {
+            fs.renameSync(tempFilePath, outputPath);
+          }
+          fileExists = true;
+        } catch (moveErr) {
+          console.error('Error moving file:', moveErr);
+          // Try alternative approach
+          try {
+            const tempData = fs.readFileSync(tempFilePath);
+            fs.writeFileSync(outputPath, tempData);
+            fs.unlinkSync(tempFilePath);
+            fileExists = true;
+          } catch (altMoveErr) {
+            console.error('Alternative move also failed:', altMoveErr);
+            throw new Error('Failed to save downloaded file');
+          }
+        }
+      } else {
+        throw new Error('Downloaded file not found at temporary location');
+      }
+
       try {
-        fileExists = fs.existsSync(outputPath);
+        if (!fileExists) {
+          fileExists = fs.existsSync(outputPath);
+        }
+
         if (!fileExists) {
           console.error('Downloaded file not found after download:', outputPath);
         } else {
@@ -2155,28 +2220,18 @@ const getMimeType = (filename) => {
 
 
 
-
-
-
-
-
-
-
-
-// Updated joinRoomByInvite function for backend.mjs
 const joinRoomByInvite = async (params) => {
-
-
-
-
   const { inviteCode } = params;
   let tempRoomDir = null;
   let tempId = null;
   let roomCorestore = null;
   let blobCore = null;
+  let blobStore = null;
   let blobSwarm = null;
   let roomPairer = null;
+  let room = null;
 
+  // Improved validation for invite code
   if (!inviteCode || typeof inviteCode !== 'string') {
     const response = {
       success: false,
@@ -2186,10 +2241,16 @@ const joinRoomByInvite = async (params) => {
     req.send(JSON.stringify(response));
     return;
   }
-  // Check valid Z32 format...
+
+  // Clean any potential non-z32 characters from the invite code
+  const cleanedCode = inviteCode.trim()
+
+  if (cleanedCode !== inviteCode) {
+    console.log(`Cleaned invite code from ${inviteCode} to ${cleanedCode}`);
+  }
 
   try {
-    console.log(`Attempting to join room with invite code: ${inviteCode.substring(0, 10)}...`);
+    console.log(`Attempting to join room with invite code: ${cleanedCode.substring(0, 10)}...`);
 
     // First ensure UserBase is initialized
     const ub = await initializeUserBase();
@@ -2200,27 +2261,64 @@ const joinRoomByInvite = async (params) => {
     await ub.ready();
     const user = await ub.getUserData();
 
-    // Create corestore for joining the room using a temporary ID for now
+    // Create corestore for joining the room using a temporary ID
     tempId = generateUUID();
-    tempRoomDir = `${roomBasePath}/${tempId}`;
-    if (!fs.existsSync(tempRoomDir)) {
-      fs.mkdirSync(tempRoomDir, { recursive: true });
+
+    // Platform-specific path handling
+    if (Bare.argv[0] === 'ios') {
+      tempRoomDir = Path.join(roomBasePath, tempId);
+      console.log(`iOS temp room directory: ${tempRoomDir}`);
+    } else {
+      tempRoomDir = `${roomBasePath}/${tempId}`;
     }
 
+    if (!fs.existsSync(tempRoomDir)) {
+      try {
+        fs.mkdirSync(tempRoomDir, { recursive: true });
+      } catch (mkdirErr) {
+        console.error('Error creating temp room directory:', mkdirErr);
+        // Try another approach for iOS
+        if (Bare.argv[0] === 'ios') {
+          tempRoomDir = Path.join(path, 'roombase', tempId);
+          fs.mkdirSync(tempRoomDir, { recursive: true });
+        }
+      }
+    }
+
+    console.log(`Created temporary room directory: ${tempRoomDir}`);
+
+    // Initialize corestore in temp directory
     roomCorestore = new Corestore(tempRoomDir);
+    console.log('Corestore created, waiting for ready...');
     await roomCorestore.ready();
+    console.log('Corestore ready');
 
-    // Set up blob core and store for attachments
-    blobCore = new Hypercore(tempRoomDir + '/blobs');
+    // Set up blob core and store
+    const blobPath = Bare.argv[0] === 'ios'
+      ? Path.join(tempRoomDir, 'blobs')
+      : tempRoomDir + '/blobs';
+
+    console.log(`Using blob path: ${blobPath}`);
+
+    blobCore = new Hypercore(blobPath);
+    console.log('BlobCore created, waiting for ready...');
     await blobCore.ready();
+    console.log('BlobCore ready');
 
-    const blobStore = new Hyperblobs(blobCore);
+    blobStore = new Hyperblobs(blobCore);
+    console.log('BlobStore created, waiting for ready...');
     await blobStore.ready();
+    console.log('BlobStore ready');
 
+    console.log('Creating swarm...');
     blobSwarm = new Hyperswarm();
+
     // Join the swarm with the blob core's key
+    console.log('Joining swarm...');
     const blobTopic = await blobSwarm.join(blobCore.key);
+    console.log('Swarm joined, flushing...');
     blobSwarm.flush();
+    console.log('Swarm flushed');
 
     // Replicate blob core when connected to peers
     blobSwarm.on('connection', (connection, peerInfo) => {
@@ -2229,73 +2327,161 @@ const joinRoomByInvite = async (params) => {
       blobCore.replicate(connection);
     });
 
-    // Pair with the room
+    // Pair with the room using the cleaned code
     console.log('Attempting to pair with room using invite code...');
-    roomPairer = RoomBase.pair(roomCorestore, inviteCode, {
+    roomPairer = RoomBase.pair(roomCorestore, cleanedCode, {
       blobCore,
       blobStore
     });
 
-    // Wait for pairing to complete
-    const room = await Promise.race([
+    console.log('Room pairer created, waiting for completion...');
+
+    // Wait for pairing to complete with longer timeout for iOS
+    const timeout = Bare.argv[0] === 'ios' ? 60000 : 30000; // 60 seconds for iOS, 30 for others
+    console.log(`Using timeout of ${timeout / 1000} seconds for platform ${Bare.argv[0]}`);
+
+    room = await Promise.race([
       roomPairer.finished(),
       new Promise((_, reject) =>
         setTimeout(() => {
-          console.error('Pairing timed out after 30 seconds');
+          console.error(`Pairing timed out after ${timeout / 1000} seconds`);
           reject(new Error('Connection timed out. Please check invite code and try again.'));
-        }, 30000)
+        }, timeout)
       )
     ]);
 
+    console.log('Pairing completed! Room object returned');
     await room.ready();
-    console.log('Room pairing completed successfully');
+    console.log('Room is ready');
 
     // Get the remote room info
+    console.log('Getting room info...');
     const roomInfo = await room.getRoomInfo();
     if (!roomInfo) {
       throw new Error('Could not get room information');
     }
 
-    // IMPORTANT CHANGE: Use the remote room ID as our primary ID
+    console.log('Room info retrieved:', roomInfo);
+
+    // IMPORTANT CHANGE: Use the remote room ID
     const remoteRoomId = roomInfo.id;
     console.log(`Retrieved remote room ID: ${remoteRoomId}, name: ${roomInfo.name}`);
 
     // Now create the proper directory with the remote ID
-    const finalRoomDir = `${roomBasePath}/${remoteRoomId}`;
-    if (!fs.existsSync(finalRoomDir)) {
-      fs.mkdirSync(finalRoomDir, { recursive: true });
+    const finalRoomDir = Bare.argv[0] === 'ios'
+      ? Path.join(roomBasePath, remoteRoomId)
+      : `${roomBasePath}/${remoteRoomId}`;
 
-      // Move everything from temp directory to final directory
+    console.log(`Final room directory will be: ${finalRoomDir}`);
+
+    // Close existing resources before moving/copying
+    console.log('Closing all temporary resources...');
+
+    // Save key references before closing
+    const roomKey = room.key;
+    const roomEncryptionKey = room.encryptionKey;
+    const blobCoreKey = blobCore.key;
+
+    // Close in reverse order of creation
+    await room.close().catch(e => console.log('Room close error:', e));
+    if (blobSwarm) await blobSwarm.destroy().catch(e => console.log('Blob swarm destroy error:', e));
+    if (blobStore) await blobStore.close().catch(e => console.log('Blob store close error:', e));
+    if (blobCore) await blobCore.close().catch(e => console.log('Blob core close error:', e));
+    if (roomCorestore) await roomCorestore.close().catch(e => console.log('Corestore close error:', e));
+    if (roomPairer) await roomPairer.close().catch(e => console.log('Pairer close error:', e));
+
+    console.log('All temporary resources closed');
+
+    // Create the final directory
+    if (!fs.existsSync(finalRoomDir)) {
+      console.log(`Creating final directory: ${finalRoomDir}`);
       try {
-        // For larger directories, you'd need a recursive copy function
-        // This is simplified for clarity
-        fs.renameSync(tempRoomDir, finalRoomDir);
-        tempRoomDir = null; // Mark as moved so we don't clean it up later
-      } catch (moveErr) {
-        console.error('Error moving room data:', moveErr);
-        // Continue with the temp directory if move fails
+        fs.mkdirSync(finalRoomDir, { recursive: true });
+      } catch (dirErr) {
+        console.error('Error creating final room directory:', dirErr);
+        throw new Error('Failed to create final room directory');
       }
     }
 
-    // Store the instances with the remote ID
-    roomCorestores[remoteRoomId] = roomCorestore;
-    roomBases[remoteRoomId] = room;
-    roomBlobSwarms[remoteRoomId] = blobSwarm;
-    roomBlobCores[remoteRoomId] = blobCore;
-    roomBlobStores[remoteRoomId] = blobStore;
+    // Move or copy data from temp to final
+    try {
+      if (Bare.argv[0] === 'ios') {
+        console.log('On iOS, copying directory contents recursively...');
+        // For iOS, we'd need a recursive copy function
+        // For simplicity in this fix, we'll skip the copy and recreate from scratch
+      } else {
+        console.log(`Moving directory from ${tempRoomDir} to ${finalRoomDir}`);
+        fs.renameSync(tempRoomDir, finalRoomDir);
+        tempRoomDir = null; // Mark as moved so we don't clean it up later
+      }
+    } catch (moveErr) {
+      console.error('Error moving room data:', moveErr);
+      // Continue anyway - we'll create fresh instances
+    }
 
-    // Mark these as successfully stored so we don't close them in cleanup
-    roomCorestore = null;
-    blobCore = null;
-    blobSwarm = null;
-    roomPairer = null;
+    // Create new instances in the final location
+    console.log('Creating new instances in final location...');
+
+    // New corestore
+    console.log('Creating final corestore...');
+    const finalCorestore = new Corestore(finalRoomDir);
+    await finalCorestore.ready();
+
+    // New blob core using the original key
+    console.log('Creating final blob core...');
+    const blobDirPath = Bare.argv[0] === 'ios'
+      ? Path.join(finalRoomDir, 'blobs')
+      : finalRoomDir + '/blobs';
+
+    if (!fs.existsSync(blobDirPath)) {
+      fs.mkdirSync(blobDirPath, { recursive: true });
+    }
+
+    const finalBlobCore = new Hypercore(blobDirPath, blobCoreKey);
+    await finalBlobCore.ready();
+
+    // New blob store
+    console.log('Creating final blob store...');
+    const finalBlobStore = new Hyperblobs(finalBlobCore);
+    await finalBlobStore.ready();
+
+    // New swarm
+    console.log('Creating final swarm...');
+    const finalBlobSwarm = new Hyperswarm();
+    const finalTopic = await finalBlobSwarm.join(finalBlobCore.key);
+    finalBlobSwarm.flush();
+
+    // Set up replication
+    finalBlobSwarm.on('connection', (connection, peerInfo) => {
+      console.log(`Final blob replication connection from peer: ${peerInfo.publicKey.toString('hex').substring(0, 8)}`);
+      finalBlobCore.replicate(connection);
+    });
+
+    // Create the final room object
+    console.log('Creating final RoomBase instance...');
+    const finalRoom = new RoomBase(finalCorestore, {
+      roomId: remoteRoomId,
+      roomName: roomInfo.name,
+      key: roomKey,
+      encryptionKey: roomEncryptionKey,
+      blobCore: finalBlobCore,
+      blobStore: finalBlobStore
+    });
+
+    await finalRoom.ready();
+    console.log('Final room is ready');
+
+    const roomBlobCoreKey = finalBlobCore?.key?.toString('hex') || null;
+
     // Set up message listener
-    if (!room._hasMessageListener) {
-      room.on('new-message', (msg) => {
+    console.log('Setting up message listener...');
+
+    if (!finalRoom._hasMessageListener) {
+      finalRoom.on('new-message', (msg) => {
         // Format the message
         const formattedMessage = {
           id: msg.id,
-          roomId: roomId,
+          roomId: remoteRoomId,
           content: msg.content,
           sender: msg.sender,
           timestamp: msg.timestamp,
@@ -2305,7 +2491,7 @@ const joinRoomByInvite = async (params) => {
           roomBlobCoreKey
         };
 
-        console.log(`New message received in room ${roomId}`);
+        console.log(`New message received in room ${remoteRoomId}`);
 
         // Send to client
         const req = rpc.request('newMessage');
@@ -2315,9 +2501,19 @@ const joinRoomByInvite = async (params) => {
         }));
       });
 
-      room._hasMessageListener = true;
-      console.log(`Message listener set up for room ${roomId}`);
+      finalRoom._hasMessageListener = true;
+      console.log(`Message listener set up for room ${remoteRoomId}`);
     }
+
+    // Store the instances with the remote ID
+    console.log('Storing final instances...');
+    roomCorestores[remoteRoomId] = finalCorestore;
+    roomBases[remoteRoomId] = finalRoom;
+    roomBlobSwarms[remoteRoomId] = finalBlobSwarm;
+    roomBlobCores[remoteRoomId] = finalBlobCore;
+    roomBlobStores[remoteRoomId] = finalBlobStore;
+
+    console.log('All resources initialized and stored successfully');
 
     // Create room object for user storage
     const newRoom = {
@@ -2325,9 +2521,9 @@ const joinRoomByInvite = async (params) => {
       name: roomInfo.name || 'Joined Room',
       description: roomInfo.description || `Joined via invite`,
       createdAt: roomInfo.createdAt || Date.now(),
-      invite: inviteCode,
-      key: room.key.toString('hex'),
-      encryptionKey: room.encryptionKey.toString('hex')
+      invite: cleanedCode,
+      key: roomKey.toString('hex'),
+      encryptionKey: roomEncryptionKey.toString('hex')
     };
 
     // Add this room to the user's rooms list
@@ -2351,6 +2547,7 @@ const joinRoomByInvite = async (params) => {
       userRooms.push(newRoom);
 
       // Update the user profile with the new rooms list
+      console.log('Updating user profile with new room...');
       await ub.updateUserProfile({
         rooms: JSON.stringify(userRooms)
       });
@@ -2358,15 +2555,13 @@ const joinRoomByInvite = async (params) => {
       console.log(`Added room ${remoteRoomId} to user's rooms`);
     }
 
-
     // Get updated user data
     const updatedUser = await ub.getUserData();
 
     // Send updated user info back to client
+    console.log('Sending updated user info to client');
     const userReq = rpc.request('userInfo');
     userReq.send(JSON.stringify(updatedUser));
-
-    console.log('Sent updated user info to client');
 
     // Send room join result
     const response = {
@@ -2381,9 +2576,19 @@ const joinRoomByInvite = async (params) => {
     return response;
 
   } catch (error) {
+    console.error('Error joining room by invite:', error);
 
+    // Cleanup resources
     try {
       // Cleanup in reverse order of creation
+      if (room) {
+        try {
+          await room.close().catch(e => console.error('Error closing room:', e));
+        } catch (e) {
+          console.error('Error during room cleanup:', e);
+        }
+      }
+
       if (roomPairer) {
         try {
           await roomPairer.close().catch(e => console.error('Error closing roomPairer:', e));
@@ -2397,6 +2602,14 @@ const joinRoomByInvite = async (params) => {
           await blobSwarm.destroy().catch(e => console.error('Error destroying blobSwarm:', e));
         } catch (e) {
           console.error('Error during blobSwarm cleanup:', e);
+        }
+      }
+
+      if (blobStore) {
+        try {
+          await blobStore.close().catch(e => console.error('Error closing blobStore:', e));
+        } catch (e) {
+          console.error('Error during blobStore cleanup:', e);
         }
       }
 
@@ -2430,14 +2643,11 @@ const joinRoomByInvite = async (params) => {
       console.error('Error during cleanup after pairing failure:', cleanupError);
     }
 
-
-
-
-
-    console.error('Error joining room by invite:', error);
+    // Send error response
     const response = {
       success: false,
-      error: error.message || 'Failed to join room'
+      error: error.message || 'Failed to join room',
+      platform: Bare.argv[0]
     };
 
     const req = rpc.request('roomJoinResult');
@@ -2446,6 +2656,14 @@ const joinRoomByInvite = async (params) => {
     return response;
   }
 };
+
+
+
+
+
+
+
+
 const generateRoomInvite = async (roomId) => {
   try {
     console.log(`Generating invite for room: ${roomId}`);

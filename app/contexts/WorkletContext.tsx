@@ -20,7 +20,7 @@ let updateMessages: ((messages: Message[], replace: boolean) => void) | undefine
 let onRoomCreated: ((room: Room) => void) | undefined = undefined;
 let onRoomJoined: ((room: Room) => void) | undefined = undefined;
 let onInviteGenerated: ((roomId: string, inviteCode: string) => void) | undefined = undefined;
-let onRoomFiles: ((room: any) => void) | undefined = undefined;
+let onRoomFiles: ((data: any) => void) | undefined = undefined;
 interface FileDownloadState {
   progress: number;
   message: string;
@@ -578,12 +578,12 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
 
                     // Request updated user data to make sure rooms are updated
                     try {
-                      const userCheckRequest = client.request('checkUserExists');
-                      userCheckRequest.send("");
+                      const userCheckRequest = client?.request('checkUserExists');
+                      userCheckRequest?.send("");
 
                       // Also refresh room list
-                      const roomsRequest = client.request('getRooms');
-                      roomsRequest.send("");
+                      const roomsRequest = client?.request('getRooms');
+                      roomsRequest?.send("");
                     } catch (requestError) {
                       console.error('Error requesting updated data after room join:', requestError);
                     }

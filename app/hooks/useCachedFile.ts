@@ -24,6 +24,8 @@ export const useCachedFile = (roomId: string, attachment: any) => {
     // Consider the file downloading if:
     // 1. It's in progress (progress between 0 and 100)
     // 2. OR it's in the active downloads ref
+
+    if (!attachmentKey) return;
     const inProgress = downloadStatus && downloadStatus.progress > 0 && downloadStatus.progress < 100;
     const isPending = attachmentKey && activeDownloadsRef?.current?.has(attachmentKey);
 

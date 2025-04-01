@@ -359,21 +359,14 @@ class RoomBase extends ReadyResource {
     if (this.opened === false) await this.ready();
     const existing = await this.base.view.findOne('@roombase/invite', {});
     if (existing) {
-      const inviteCode = z32.encode(existing.invite);
-      console.log('Using existing invite code:', inviteCode);
-      return inviteCode;
+      return z32.encode(existing.invite);
     }
 
     const { id, invite, publicKey, expires } = BlindPairing.createInvite(this.base.key);
     const record = { id, invite, publicKey, expires };
     await this.base.append(dispatch('@roombase/add-invite', record));
-
-    const inviteCode = z32.encode(record.invite);
-    console.log('Generated new invite code:', inviteCode);
-    console.log('Invite code is valid Z32:', /^[a-z2-7]+$/.test(inviteCode));
-    return inviteCode;
+    return z32.encode(record.invite);
   }
-
 
   async addWriter(key) {
     await this.base.append(dispatch('@roombase/add-writer', { key: b4a.isBuffer(key) ? key : b4a.from(key) }));
@@ -647,11 +640,11 @@ class RoomBase extends ReadyResource {
 
       localSwarm = new Hyperswarm();
       topic = await localSwarm.join(coreKey);
-      if (onProgress) onProgress(0, "Joined to swarm");
+      if (onProgress) onProgress(0, "Searching for peer");
 
       const connectionHandler = (conn) => {
         remoteCore.replicate(conn);
-        if (onProgress) onProgress(0, "Replication is ready");
+        if (onProgress) onProgress(0, "");
       };
 
       localSwarm.on('connection', connectionHandler);
@@ -968,7 +961,7 @@ class RoomBase extends ReadyResource {
       // Create hyperblobs for streaming
       const remoteBlobs = new Hyperblobs(remoteCore);
       await remoteBlobs.ready();
-      if (onProgress) onProgress(50, "Hyperblob ready");
+      if (onProgress) onProgress(30, "Hyperblob ready");
 
       // Check for cancellation after hyperblobs is ready
       if (signal && signal.aborted) {

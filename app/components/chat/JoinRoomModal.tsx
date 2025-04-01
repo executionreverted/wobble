@@ -82,42 +82,14 @@ const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
       return;
     }
 
-    // Debug the exact code being submitted
-    console.log('Join with code:', inviteCode);
-    console.log('Code length:', inviteCode.length);
-    console.log('Raw code characters:', Array.from(inviteCode).map(c => c.charCodeAt(0)));
-    console.log('Is valid Z32:', /^[a-z2-7]+$/.test(inviteCode));
-
     // Add a pre-processing step to clean the invite code
     let cleanedCode = inviteCode.trim();
 
     // Replace any non-Z32 characters
-    cleanedCode = cleanedCode.replace(/[^a-z2-7]/g, '');
+    // cleanedCode = cleanedCode.replace(/[^a-z2-7]/g, '');
 
     if (cleanedCode !== inviteCode.trim()) {
-      console.log('Cleaned invite code:', cleanedCode);
-      console.log('Cleaned code is valid Z32:', /^[a-z2-7]+$/.test(cleanedCode));
-
-      // Ask user if they want to use the cleaned code
-      Alert.alert(
-        'Invalid Invite Code Format',
-        'The invite code contains invalid characters. Would you like to try with a cleaned version?',
-        [
-          {
-            text: 'Cancel',
-            style: 'cancel',
-            onPress: () => setIsLoading(false)
-          },
-          {
-            text: 'Use Cleaned Code',
-            onPress: () => {
-              setInviteCode(cleanedCode);
-              // Continue with the cleaned code
-              submitJoinRequest(cleanedCode);
-            }
-          }
-        ]
-      );
+      setInviteCode(cleanedCode)
       return;
     }
 

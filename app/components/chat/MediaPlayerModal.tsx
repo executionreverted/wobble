@@ -233,7 +233,6 @@ const MediaPlayerModal: React.FC<MediaPlayerModalProps> = ({
   // Render different content based on media type
   const renderMediaContent = () => {
     const mediaType = getMediaType();
-    console.log(mediaType)
     if (!filePath) {
       return (
         <View style={styles.errorContainer}>
