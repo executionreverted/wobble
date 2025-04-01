@@ -1336,6 +1336,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
               }
             }));
 
+            activeDownloadsRef.current.add(downloadKey);
             return true;
           }
         }

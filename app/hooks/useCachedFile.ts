@@ -82,7 +82,11 @@ export const useCachedFile = (roomId: string, attachment: any) => {
       }
     };
 
-    checkCache();
+
+    if (!isCheckingCache) {
+      checkCache();
+    }
+
   }, [attachmentKey, roomId, attachment, isCached, downloadStatus]);
 
   // Function to handle downloads with cache awareness

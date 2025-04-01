@@ -295,7 +295,7 @@ const EnhancedChatRoom = () => {
         console.error('Error loading more messages:', err);
         setIsLoadingMore(false);
       });
-  }, [isLoadingMore, loadMoreMessages]);
+  }, [isLoadingMore]);
 
   // Render the loading indicator for older messages
   const renderFooter = () => {
