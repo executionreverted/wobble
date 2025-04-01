@@ -70,6 +70,7 @@ const EnhancedMessage = ({ message, isOwnMessage, roomId }) => {
               // Generate a unique ID for this attachment
               const attachmentId = attachment.blobId || `attachment-${message.id}-${index}`;
 
+              const isOwnFile = attachment.coreKey === message.roomBlobCoreKey;
               // Check if file is an image
               const isImage = FileCacheManager.isImageFile(attachment.name);
 
@@ -79,12 +80,14 @@ const EnhancedMessage = ({ message, isOwnMessage, roomId }) => {
                   handleAttachmentPress={() => handleAttachmentPress(attachment)}
                   attachment={attachment}
                   roomId={roomId}
+                  isOwnFile={isOwnFile}
                 /> :
                 <EnhancedFileAttachment
                   key={`file-${attachmentId}`}
                   handleAttachmentPress={() => handleAttachmentPress(attachment)}
                   attachment={attachment}
                   roomId={roomId}
+                  isOwnFile={isOwnFile}
                 />;
             })}
           </View>

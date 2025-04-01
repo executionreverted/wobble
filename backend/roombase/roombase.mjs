@@ -586,6 +586,7 @@ class RoomBase extends ReadyResource {
         size: data.length,
         blobId: blobId,
         coreKey: this.blobCore.key.toString('hex'),
+        ownCoreKey: this.blobCore.key.toString('hex'),
         timestamp: Date.now(),
         metadata: options.metadata || {}
       };
@@ -1168,6 +1169,7 @@ class RoomBase extends ReadyResource {
       roomCorestores[roomId] = roomCorestore;
       roomBases[roomId] = room;
 
+      const roomBlobCoreKey = room.blobCore?.key?.toString('hex') || null;
       // Set up message listener if not already set
       if (!room._hasMessageListener) {
         room.on('new-message', (msg) => {
@@ -1180,7 +1182,8 @@ class RoomBase extends ReadyResource {
             timestamp: msg.timestamp,
             system: msg.system || false,
             attachments: msg.attachments || "[]",
-            hasAttachments: msg.hasAttachments
+            hasAttachments: msg.hasAttachments,
+            roomBlobCoreKey
           };
 
           // Send to client

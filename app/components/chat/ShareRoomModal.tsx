@@ -8,12 +8,15 @@ import {
   Share,
   Platform,
   Alert,
-  ActivityIndicator
+  ActivityIndicator,
+  Dimensions
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { COLORS } from '../../utils/constants';
 import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
+
+const { width, height } = Dimensions.get('window');
 
 interface ShareRoomProps {
   visible: boolean;
@@ -21,6 +24,7 @@ interface ShareRoomProps {
   inviteCode: string;
   roomName: string;
 }
+
 
 const ShareRoomModal: React.FC<ShareRoomProps> = ({
   visible,
@@ -58,7 +62,6 @@ const ShareRoomModal: React.FC<ShareRoomProps> = ({
       }
 
       setCopied(true);
-      Alert.alert('Success', 'Invite code copied to clipboard');
 
       // Reset copied state after 3 seconds
       setTimeout(() => setCopied(false), 3000);
@@ -99,232 +102,283 @@ const ShareRoomModal: React.FC<ShareRoomProps> = ({
 
   return (
     <Modal
-      visible={visible}
       transparent
-      animationType="slide"
+      visible={visible}
+      animationType="fade"
       onRequestClose={onClose}
     >
       <View style={styles.modalContainer}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Share Room</Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <MaterialIcons name="close" size={24} color={COLORS.textPrimary} />
+        <View style={styles.modalWrapper}>
+          {/* Close Button */}
+          <View style={styles.closeButtonContainer}>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={onClose}
+            >
+              <MaterialIcons
+                name="close"
+                size={24}
+                color={COLORS.textSecondary}
+              />
             </TouchableOpacity>
           </View>
 
-          <View style={styles.contentContainer}>
+          {/* Modal Header */}
+          <View style={styles.headerContainer}>
+            <Text style={styles.modalTitle}>Share Room</Text>
+          </View>
+
+          {/* Room Name */}
+          <View style={styles.roomNameContainer}>
             <Text style={styles.roomName}>#{roomName}</Text>
+          </View>
 
-            {!hasInviteCode ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={COLORS.primary} />
-                <Text style={styles.loadingText}>Generating invite code...</Text>
+          {/* Loading State */}
+          {!hasInviteCode ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator
+                size="large"
+                color={COLORS.primary}
+              />
+              <Text style={styles.loadingText}>
+                Generating invite code...
+              </Text>
+            </View>
+          ) : (
+            <>
+              {/* QR Code Container */}
+              <View style={styles.qrContainer}>
+                <QRCode
+                  value={inviteCode}
+                  size={200}
+                  color={COLORS.textPrimary}
+                  backgroundColor={COLORS.tertiaryBackground}
+                  logoBackgroundColor={COLORS.tertiaryBackground}
+                />
               </View>
-            ) : (
-              <>
-                <View style={styles.qrContainer}>
-                  <QRCode
-                    value={inviteCode}
-                    size={180}
-                    color={COLORS.textPrimary}
-                    backgroundColor={COLORS.tertiaryBackground}
-                    logoBackgroundColor={COLORS.tertiaryBackground}
-                  />
-                </View>
 
-                <View style={styles.inviteCodeContainer}>
-                  <Text style={styles.inviteCodeLabel}>Invite Code:</Text>
-                  <TouchableOpacity
-                    style={styles.codeWrapper}
-                    activeOpacity={0.7}
-                    onPress={handleCopyInvite}
+              {/* Invite Code Container */}
+              <View style={styles.inviteCodeContainer}>
+                <Text style={styles.inviteCodeLabel}>Invite Code:</Text>
+                <TouchableOpacity
+                  style={styles.inviteCodeWrapper}
+                  activeOpacity={0.7}
+                  onPress={handleCopyInvite}
+                >
+                  <Text
+                    style={styles.inviteCode}
+                    numberOfLines={1}
+                    ellipsizeMode="middle"
                   >
-                    <Text style={styles.inviteCode} selectable={true}>
-                      {inviteCode}
-                    </Text>
-                    <MaterialIcons
-                      name="content-copy"
-                      size={20}
-                      color={COLORS.primary}
-                      style={styles.copyIcon}
+                    {inviteCode}
+                  </Text>
+                  <MaterialIcons
+                    name="content-copy"
+                    size={20}
+                    color={COLORS.primary}
+                  />
+                </TouchableOpacity>
+              </View>
+
+              {/* Instructions */}
+              <Text style={styles.instructionText}>
+                Share this invite code or scan the QR code to join this room.
+                Anyone with this code can join the room.
+              </Text>
+
+              {/* Action Buttons */}
+              <View style={styles.buttonContainer}>
+                {/* Copy Button */}
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={handleCopyInvite}
+                  disabled={isLoading}
+                >
+                  {isLoading ? (
+                    <ActivityIndicator
+                      size="small"
+                      color={COLORS.textPrimary}
                     />
-                  </TouchableOpacity>
-                </View>
+                  ) : (
+                    <>
+                      <MaterialIcons
+                        name={copied ? "check" : "content-copy"}
+                        size={24}
+                        color={COLORS.textPrimary}
+                      />
+                      <Text style={styles.actionButtonText}>
+                        {copied ? 'Copied!' : 'Copy Code'}
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
 
-                <Text style={styles.instructionText}>
-                  Share this invite code or scan the QR code to join this room.
-                  Anyone with this code can join the room.
-                </Text>
-
-                <View style={styles.buttonContainer}>
+                {/* Share Button (Mobile Only) */}
+                {Platform.OS !== 'web' && (
                   <TouchableOpacity
-                    style={[styles.actionButton, copied && styles.copiedButton]}
-                    onPress={handleCopyInvite}
+                    style={styles.actionButton}
+                    onPress={handleShareInvite}
                     disabled={isLoading}
                   >
                     {isLoading ? (
-                      <ActivityIndicator size="small" color={COLORS.textPrimary} />
+                      <ActivityIndicator
+                        size="small"
+                        color={COLORS.textPrimary}
+                      />
                     ) : (
                       <>
                         <MaterialIcons
-                          name={copied ? "check" : "content-copy"}
+                          name="share"
                           size={24}
                           color={COLORS.textPrimary}
                         />
-                        <Text style={styles.actionButtonText}>
-                          {copied ? 'Copied!' : 'Copy Code'}
-                        </Text>
+                        <Text style={styles.actionButtonText}>Share</Text>
                       </>
                     )}
                   </TouchableOpacity>
-
-                  {Platform.OS !== 'web' && (
-                    <TouchableOpacity
-                      style={[styles.actionButton, styles.shareButton]}
-                      onPress={handleShareInvite}
-                      disabled={isLoading}
-                    >
-                      {isLoading ? (
-                        <ActivityIndicator size="small" color={COLORS.textPrimary} />
-                      ) : (
-                        <>
-                          <MaterialIcons name="share" size={24} color={COLORS.textPrimary} />
-                          <Text style={styles.actionButtonText}>Share</Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </>
-            )}
-          </View>
+                )}
+              </View>
+            </>
+          )}
         </View>
       </View>
     </Modal>
   );
 };
 
-const styles = StyleSheet.create({
+
+export const styles = StyleSheet.create({
+  // Full-screen modal container
   modalContainer: {
     flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)', // Semi-transparent background
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    padding: 20,
   },
-  modalContent: {
+
+  // Modal content wrapper
+  modalWrapper: {
+    width: width * 0.90, // 90% of screen width
+    maxWidth: 500, // Maximum width
     backgroundColor: COLORS.background,
     borderRadius: 16,
-    width: '90%',
-    maxWidth: 400,
-    paddingBottom: 24,
-    elevation: 5,
+    padding: 20,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: {
+      width: 0,
+      height: 4
+    },
     shadowOpacity: 0.25,
-    shadowRadius: 3.84,
+    shadowRadius: 4.65,
+    elevation: 8,
   },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.separator,
-    padding: 16,
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: COLORS.textPrimary,
+
+  // Close button positioning
+  closeButtonContainer: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    zIndex: 10,
   },
   closeButton: {
-    padding: 8,
+    backgroundColor: 'rgba(255,255,255,0.1)',
     borderRadius: 20,
+    padding: 8,
   },
-  contentContainer: {
-    padding: 20,
-    minHeight: 200,
+
+  // Header Styles
+  headerContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 15,
   },
-  roomName: {
-    fontSize: 20,
+  modalTitle: {
+    fontSize: 22,
     fontWeight: 'bold',
-    color: COLORS.primary,
-    marginBottom: 20,
+    color: COLORS.textPrimary,
     textAlign: 'center',
   },
+
+  // Room Name Styles
+  roomNameContainer: {
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  roomName: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+
+  // QR Code Container Styles
   qrContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
-    padding: 20,
-    backgroundColor: COLORS.tertiaryBackground,
+    marginBottom: 20,
+    backgroundColor: COLORS.secondaryBackground,
     borderRadius: 12,
+    padding: 20,
   },
+
+  // Invite Code Styles
+  inviteCodeContainer: {
+    backgroundColor: COLORS.secondaryBackground,
+    borderRadius: 10,
+    padding: 15,
+    marginBottom: 15,
+  },
+  inviteCodeLabel: {
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  inviteCodeWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.tertiaryBackground,
+    borderRadius: 8,
+    padding: 12,
+  },
+  inviteCode: {
+    color: COLORS.textPrimary,
+    fontSize: 16,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    flex: 1,
+    marginRight: 10,
+  },
+
+  // Loading Styles
   loadingContainer: {
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 200,
     padding: 20,
   },
   loadingText: {
     marginTop: 16,
     fontSize: 16,
     color: COLORS.textSecondary,
-  },
-  inviteCodeContainer: {
-    backgroundColor: COLORS.secondaryBackground,
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 16,
-  },
-  inviteCodeLabel: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginBottom: 10,
-    fontWeight: '500',
-  },
-  codeWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.tertiaryBackground,
-    borderRadius: 6,
-    padding: 12,
-    paddingVertical: 14,
-  },
-  inviteCode: {
-    flex: 1,
-    fontSize: 16,
-    color: COLORS.textPrimary,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-  },
-  copyIcon: {
-    marginLeft: 8,
-  },
-  instructionText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    marginBottom: 24,
     textAlign: 'center',
-    lineHeight: 20,
   },
+
+  // Button Styles
   buttonContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-between',
+    marginTop: 15,
   },
   actionButton: {
-    backgroundColor: COLORS.primary,
-    borderRadius: 8,
-    padding: 14,
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    flex: 1,
-    marginHorizontal: 8,
-  },
-  copiedButton: {
-    backgroundColor: COLORS.success,
-  },
-  shareButton: {
-    backgroundColor: COLORS.primaryDark,
+    backgroundColor: COLORS.primary,
+    borderRadius: 10,
+    paddingVertical: 12,
+    marginHorizontal: 5,
   },
   actionButtonText: {
     color: COLORS.textPrimary,
@@ -332,6 +386,13 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontSize: 16,
   },
-});
 
-export default ShareRoomModal;
+  // Instruction Text
+  instructionText: {
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 15,
+    lineHeight: 20,
+  },
+}); export default ShareRoomModal;

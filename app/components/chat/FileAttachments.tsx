@@ -8,6 +8,12 @@ import fileCacheManager, { FileCacheManager } from '../../utils/FileCacheManager
 import useCachedFile from '../../hooks/useCachedFile';
 import Svg, { Circle } from 'react-native-svg';
 
+interface AttachmentProps {
+  attachment: any;
+  roomId: string;
+  isOwnFile: boolean;  // Receive this directly instead of computing it
+  handleAttachmentPress?: (attachment: any) => void;
+}
 
 const DownloadButton = ({
   isDownloading,
@@ -85,12 +91,9 @@ const DownloadButton = ({
 export const EnhancedImageAttachment = ({
   handleAttachmentPress,
   attachment,
-  roomId
-}: {
-  attachment: any;
-  roomId: string;
-  handleAttachmentPress?: (attachment: any) => void;
-}) => {
+  roomId,
+  isOwnFile
+}: AttachmentProps) => {
   const { saveFileToDevice, activeDownloadsRef, cancelDownload } = useWorklet();
   const [localPreviewUri, setLocalPreviewUri] = useState<string | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
@@ -118,9 +121,6 @@ export const EnhancedImageAttachment = ({
 
   // Determine if download is complete
   const isDownloadComplete = downloadStatus?.progress >= 100 || isCached;
-
-  // Check if the file is from our own blob store (our own uploaded file)
-  const isOwnFile = attachment?.coreKey === attachment?.ownCoreKey;
 
   // Check if we have a path to the file but haven't loaded the data yet
   const hasPath = downloadStatus?.path;
@@ -389,12 +389,9 @@ export const EnhancedImageAttachment = ({
 export const EnhancedFileAttachment = ({
   handleAttachmentPress,
   attachment,
-  roomId
-}: {
-  attachment: any;
-  roomId: string;
-  handleAttachmentPress?: (attachment: any) => void;
-}) => {
+  roomId,
+  isOwnFile
+}: AttachmentProps) => {
   const { saveFileToDevice, activeDownloadsRef, cancelDownload } = useWorklet();
 
   // Use the cached file hook
@@ -422,8 +419,6 @@ export const EnhancedFileAttachment = ({
   // Combined state that handles all download states
   const isDownloadActive = (isDownloading || isDownloadPending) && !hasError;
 
-  // Check if the file is from our own blob store (our own uploaded file)
-  const isOwnFile = attachment?.coreKey === attachment?.ownCoreKey;
 
   // Auto-preview our own files when component mounts
   useEffect(() => {

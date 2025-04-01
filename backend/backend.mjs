@@ -587,6 +587,7 @@ const createRoom = async (roomData) => {
       encryptionKey: room.encryptionKey.toString('hex')
     };
 
+    const roomBlobCoreKey = room.blobCore?.key?.toString('hex') || null;
     // Set up message listener
     room.on('new-message', (msg) => {
       // Format the message
@@ -598,8 +599,8 @@ const createRoom = async (roomData) => {
         timestamp: msg.timestamp,
         system: msg.system || false,
         attachments: msg.attachments || "[]",
-        hasAttachments: msg.hasAttachments
-
+        hasAttachments: msg.hasAttachments,
+        roomBlobCoreKey: roomBlobCoreKey
       };
 
       console.log(`New message in room ${roomId}:`, formattedMessage.id);
@@ -828,6 +829,7 @@ const initializeRoom = async (roomData) => {
     const room = new RoomBase(roomCorestore, roomOptions);
     await room.ready();
     console.log(`Room ${roomId} is ready`);
+    const roomBlobCoreKey = room.blobCore?.key?.toString('hex') || null;
 
     // Set up message listener if not already set
     if (!room._hasMessageListener) {
@@ -841,8 +843,8 @@ const initializeRoom = async (roomData) => {
           timestamp: msg.timestamp,
           system: msg.system || false,
           attachments: msg.attachments || "[]",
-          hasAttachments: msg.hasAttachments
-
+          hasAttachments: msg.hasAttachments,
+          roomBlobCoreKey
         };
 
         console.log(`New message in room ${roomId}:`, formattedMessage.id);
@@ -920,6 +922,7 @@ const getMessagesFromRoom = async (room, roomId, options = {}) => {
 
     console.log(`Retrieved ${messages.length} messages from room ${roomId}`);
 
+    const roomBlobCoreKey = room.blobCore?.key?.toString('hex') || null;
     // Format messages with roomId
     const formattedMessages = messages.map(msg => ({
       id: msg.id || `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
@@ -930,7 +933,8 @@ const getMessagesFromRoom = async (room, roomId, options = {}) => {
       system: msg.system || false,
       // Include attachments if present
       hasAttachments: msg.hasAttachments || false,
-      attachments: msg.attachments || null
+      attachments: msg.attachments || null,
+      roomBlobCoreKey
     }));
 
     console.log(`Formatted ${formattedMessages.length} messages with roomId ${roomId}`);
@@ -1004,7 +1008,7 @@ const joinRoom = async (roomId) => {
     const response = {
       success: true,
       roomId,
-      messages
+      messages,
     };
 
     console.log(`Sending ${messages.length} messages to client for room ${roomId}`);
@@ -1341,6 +1345,7 @@ const preInitializeAllRooms = async () => {
         if (room) {
           console.log(`Pre-initialized room: ${roomData.id} (${roomData.name})`);
 
+          const roomBlobCoreKey = room.blobCore?.key?.toString('hex') || null;
           // Set up message listener if not already set
           if (!room._hasMessageListener) {
             room.on('new-message', (msg) => {
@@ -1353,8 +1358,8 @@ const preInitializeAllRooms = async () => {
                 timestamp: msg.timestamp,
                 system: msg.system || false,
                 attachments: msg.attachments || "[]",
-                hasAttachments: msg.hasAttachments
-
+                hasAttachments: msg.hasAttachments,
+                roomBlobCoreKey
               };
 
               // Send to client
@@ -1646,84 +1651,6 @@ const createStableBlobId = (blobRef) => {
   return `blob-${Date.now()}-${Math.random().toString(36).substring(2)}`;
 };
 
-
-const generateSafeFilePath = (baseDir, fileName) => {
-  // Sanitize filename
-  const sanitizedFileName = fileName
-    .replace(/[^a-zA-Z0-9\._-]/g, '_')
-    .replace(/(\.{2,})/g, '.');
-
-  // Use a timestamp to prevent filename collisions
-  const timestamp = Date.now();
-  const safeFileName = `${timestamp}_${sanitizedFileName}`;
-
-  // Ensure the directory exists
-  const fullPath = Path.join(baseDir, safeFileName);
-
-  console.log('Creating safe file path:', {
-    baseDir,
-    originalFileName: fileName,
-    sanitizedFileName: safeFileName,
-    fullPath
-  });
-
-  return fullPath;
-};
-
-
-
-// Update the handleFileDownload function in backend.mjs
-const resolveFilePath = async (suggestedPath) => {
-  try {
-    console.log('Resolving file path:', suggestedPath);
-
-    // Handle different path formats
-    let normalizedPath = suggestedPath;
-
-    // Remove file:// prefix if present
-    if (normalizedPath.startsWith('file://')) {
-      normalizedPath = normalizedPath.replace('file://', '');
-    }
-
-    // For Android, handle specific path translation
-    if (Bare.argv[0] === 'android') {
-      // Check if path starts with content:// or file://
-      if (normalizedPath.startsWith('content://')) {
-        // Note: This might need to be handled differently in a Bare environment
-        normalizedPath = normalizedPath.replace('content://')
-      }
-    }
-
-    console.log('Normalized path:', normalizedPath);
-
-    // Verify file exists using both FileSystem and bare-fs
-    let fileExists = false;
-    try {
-      // First try bare-fs
-      fileExists = fs.existsSync(normalizedPath);
-    } catch (barefsError) {
-      console.error('bare-fs file check error:', barefsError);
-    }
-
-    if (!fileExists) {
-      console.error('File does not exist at path:', {
-        path: normalizedPath,
-        originalPath: suggestedPath
-      });
-      throw new Error(`File not found: ${normalizedPath}`);
-    }
-
-    return normalizedPath;
-  } catch (error) {
-    console.error('Comprehensive Path Resolution Error:', {
-      error: error.message,
-      suggestedPath,
-      platformOS: Bare.argv[0]
-    });
-    throw error;
-  }
-};
-
 const handleCancelDownload = (data) => {
   try {
     const { roomId, attachmentId, attachmentKey } = data;
@@ -1746,13 +1673,17 @@ const handleCancelDownload = (data) => {
       // Clean up any temporary files
       if (downloadInfo && downloadInfo.tempFilePath) {
         try {
-          console.log(`Cleaning up temporary file: ${downloadInfo.tempFilePath}`);
-          fs.unlinkSync(downloadInfo.tempFilePath);
+          console.log(`Checking if temporary file exists: ${downloadInfo.tempFilePath}`);
+          if (fs.existsSync(downloadInfo.tempFilePath)) {
+            console.log(`Cleaning up temporary file: ${downloadInfo.tempFilePath}`);
+            fs.unlinkSync(downloadInfo.tempFilePath);
+          } else {
+            console.log(`Temporary file does not exist, skipping deletion: ${downloadInfo.tempFilePath}`);
+          }
         } catch (fileErr) {
-          console.error('Error removing temporary file:', fileErr);
+          console.error('Error handling temporary file cleanup:', fileErr);
         }
       }
-
       // Close any swarm connections
       if (downloadInfo && downloadInfo.swarm) {
         try {
@@ -2268,6 +2199,7 @@ const joinRoomByInvite = async (params) => {
     roomCorestores[roomId] = roomCorestore;
     roomBases[roomId] = room;
 
+    const roomBlobCoreKey = room.blobCore?.key?.toString('hex') || null;
     // Set up message listener
     if (!room._hasMessageListener) {
       room.on('new-message', (msg) => {
@@ -2280,8 +2212,8 @@ const joinRoomByInvite = async (params) => {
           timestamp: msg.timestamp,
           system: msg.system || false,
           attachments: msg.attachments || "[]",
-          hasAttachments: msg.hasAttachments
-
+          hasAttachments: msg.hasAttachments,
+          roomBlobCoreKey
         };
 
         // Send to client
