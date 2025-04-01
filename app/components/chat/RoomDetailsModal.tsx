@@ -20,7 +20,7 @@ const RoomDetailsModal = ({
   room,
   onClose
 }: any) => {
-  const { getRoomFiles } = useWorklet();
+  const { setCallbacks, rpcClient, getRoomFiles } = useWorklet();
   const { user } = useUser();
   const [files, setFiles] = useState<FileAttachment[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -28,23 +28,51 @@ const RoomDetailsModal = ({
   const [activeSection, setActiveSection] = useState('info');
   // Fetch files when modal opens
   useEffect(() => {
-    if (visible && room) {
-      fetchFiles(null);
+    if (visible && room && activeSection === 'files') {
+      fetchFiles();
     }
     if (!visible) {
-      setActiveSection('info')
+      setActiveSection('info');
+      setFiles([]);
     }
-  }, [visible, room]);
+  }, [visible, room, activeSection]);
 
-  const fetchFiles = async (before: any) => {
-    if (isLoading) return;
+  const fetchFiles = async (before?: number) => {
+    if (isLoading || !room) return;
 
     setIsLoading(true);
+
     try {
-      const result = await getRoomFiles(room.id, {
-        limit: 20,
-        before
+      // Use a promise to handle the RPC callback
+      const filePromise = new Promise<{ files: FileAttachment[], hasMore: boolean }>((resolve, reject) => {
+        // Set up a temporary callback to handle room files response
+        const callback = (data: any) => {
+          if (data.success) {
+            resolve({
+              files: data.files,
+              hasMore: data.hasMore
+            });
+          } else {
+            reject(new Error(data.error || 'Failed to fetch room files'));
+          }
+        };
+
+        // Set the callback
+        setCallbacks({
+          onRoomFiles: callback
+        });
+
+        // Send the request to get room files
+        const request = rpcClient.request('getRoomFiles');
+        request.send(JSON.stringify({
+          roomId: room.id,
+          limit: 20,
+          before
+        }));
       });
+
+      // Wait for the promise to resolve
+      const result = await filePromise;
 
       setFiles(prev =>
         before
@@ -54,6 +82,7 @@ const RoomDetailsModal = ({
       setHasMore(result.hasMore);
     } catch (error) {
       console.error('Error fetching room files:', error);
+      // Optionally show an error to the user
     } finally {
       setIsLoading(false);
     }
@@ -66,7 +95,6 @@ const RoomDetailsModal = ({
       fetchFiles(oldestFile.timestamp);
     }
   };
-
   const getFileIcon = (fileName: string | undefined) => {
     const ext = fileName?.split('.').pop()?.toLowerCase() || '';
     const iconMap = {

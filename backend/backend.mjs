@@ -1202,7 +1202,6 @@ const getRoomFiles = async (params) => {
     req.send(JSON.stringify(response));
   }
 };
-
 // Get all rooms the user is part of
 const getRooms = async () => {
   try {

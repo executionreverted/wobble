@@ -69,7 +69,8 @@ export interface WorkletContextType {
     updateRooms?: (rooms: Room[]) => void,
     updateMessages?: (messages: Message[], replace: boolean) => void,
     onRoomCreated?: (room: Room) => void,
-    onRoomJoined?: (room: Room) => void
+    onRoomJoined?: (room: Room) => void,
+    onRoomFiles?: (files: any) => void
   }) => void;
   reinitializeBackend: () => Promise<boolean>;
   onInviteGenerated?: (roomId: string, inviteCode: string) => void;
@@ -649,6 +650,24 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
               }
             }
 
+            if (req.command === 'roomFiles') {
+              try {
+                const data = b4a.toString(req.data);
+                const parsedData = JSON.parse(data);
+                console.log('Room files received:', parsedData);
+
+                // Check if the onRoomFiles callback exists
+                if (onRoomFiles) {
+                  console.log('Calling onRoomFiles callback with:', parsedData);
+                  onRoomFiles(parsedData);
+                } else {
+                  console.log('No onRoomFiles callback registered');
+                }
+              } catch (e) {
+                console.error('Error handling roomFiles:', e);
+              }
+            }
+
             if (req.command === 'newMessage') {
               try {
                 const data = b4a.toString(req.data);
@@ -910,7 +929,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
     onRoomCreated?: (room: Room) => void,
     onRoomJoined?: (room: Room) => void,
     onInviteGenerated?: (roomId: string, inviteCode: string) => void,
-    onRoomFiles?: (roomId: string) => void
+    onRoomFiles?: (data: any) => void
   }) => {
     console.log('Setting callbacks in WorkletContext:', callbacks);
 
