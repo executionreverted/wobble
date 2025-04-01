@@ -2117,6 +2117,7 @@ const getMimeType = (filename) => {
 
 
 
+// Updated joinRoomByInvite function for backend.mjs
 const joinRoomByInvite = async (params) => {
   const { inviteCode } = params;
 
@@ -2129,8 +2130,21 @@ const joinRoomByInvite = async (params) => {
     req.send(JSON.stringify(response));
     return;
   }
+  const isValidZ32 = /^[a-z2-7]+$/.test(inviteCode);
+  if (!isValidZ32) {
+    console.error('Invalid Z32 invite code:', inviteCode.substring(0, 10) + '...');
+    const response = {
+      success: false,
+      error: 'Invalid invite code format. Make sure you copied it correctly.'
+    };
+    const req = rpc.request('roomJoinResult');
+    req.send(JSON.stringify(response));
+    return;
+  }
 
   try {
+    console.log(`Attempting to join room with invite code: ${inviteCode.substring(0, 10)}...`);
+
     // First ensure UserBase is initialized
     const ub = await initializeUserBase();
     if (!ub) {
@@ -2142,6 +2156,7 @@ const joinRoomByInvite = async (params) => {
 
     // Generate a unique room ID
     const roomId = generateUUID();
+    console.log(`Generated room ID: ${roomId}`);
 
     // Create room directory
     const roomDir = `${roomBasePath}/${roomId}`;
@@ -2160,34 +2175,59 @@ const joinRoomByInvite = async (params) => {
     const blobStore = new Hyperblobs(blobCore);
     await blobStore.ready();
 
-    if (!roomBlobSwarms[roomId]) {
+    const blobSwarm = new Hyperswarm();
 
-      const blobSwarm = new Hyperswarm();
+    // Join the swarm with the blob core's key
+    const blobTopic = await blobSwarm.join(blobCore.key);
 
-      // Join the swarm with the blob core's key
-      const blobTopic = await blobSwarm.join(blobCore.key);
+    blobSwarm.flush();
 
-      blobSwarm.flush()
+    // Replicate blob core when connected to peers
+    blobSwarm.on('connection', (connection, peerInfo) => {
+      console.log(`Blob replication connection from peer: ${peerInfo.publicKey.toString('hex').substring(0, 8)}`);
+      console.log('A peer is requesting our blob file');
+      blobCore.replicate(connection);
+    });
 
-      // Replicate blob core when connected to peers
-      blobSwarm.on('connection', (connection, peerInfo) => {
-        console.log(`Blob replication connection from peer: ${peerInfo.publicKey.toString('hex').substring(1, 8)}`);
-        console.log('a peer is requesting our blob file')
-        blobCore.replicate(connection);
-      });
+    roomBlobSwarms[roomId] = blobSwarm;
+    roomBlobCores[roomId] = blobCore;
+    roomBlobStores[roomId] = blobStore;
 
-      roomBlobSwarms[roomId] = blobSwarm
-    }
+    console.log('Attempting to pair with room using invite code...');
+    console.log('Invite code format check:', {
+      length: inviteCode.length,
+      isValidZ32: /^[a-z2-7]+$/.test(inviteCode)
+    });
 
-
-
-    // Join the room using the invite code
-    const room = await RoomBase.pair(roomCorestore, inviteCode, {
+    // Join the room using the invite code through pairing
+    const roomPairer = RoomBase.pair(roomCorestore, inviteCode, {
       blobCore,
       blobStore
-    }).finished();
+    });
+    console.log('Room pairer created, waiting for pairing to complete...');
 
-    await room.ready();
+    // Wrap the pairing in a timeout to avoid indefinite waiting
+    try {
+      const room = await Promise.race([
+        roomPairer.finished(),
+        new Promise((_, reject) =>
+          setTimeout(() => {
+            console.error('Pairing timed out after 30 seconds');
+            reject(new Error('Connection timed out. Please check invite code and try again.'));
+          }, 30000)
+        )
+      ]);
+
+      await room.ready();
+      console.log('Room pairing completed successfully');
+
+      // Rest of your code...
+    } catch (pairingError) {
+      console.error('Error during room pairing:', pairingError);
+      throw pairingError; // Rethrow to be caught by outer try/catch
+    }
+
+    console.log('Room is ready');
 
     // Get room info
     const roomInfo = await room.getRoomInfo();
@@ -2195,11 +2235,14 @@ const joinRoomByInvite = async (params) => {
       throw new Error('Could not get room information');
     }
 
+    console.log(`Retrieved room info: ${roomInfo.name}`);
+
     // Store the instances
     roomCorestores[roomId] = roomCorestore;
     roomBases[roomId] = room;
 
     const roomBlobCoreKey = room.blobCore?.key?.toString('hex') || null;
+
     // Set up message listener
     if (!room._hasMessageListener) {
       room.on('new-message', (msg) => {
@@ -2216,6 +2259,8 @@ const joinRoomByInvite = async (params) => {
           roomBlobCoreKey
         };
 
+        console.log(`New message received in room ${roomId}`);
+
         // Send to client
         const req = rpc.request('newMessage');
         req.send(JSON.stringify({
@@ -2225,13 +2270,14 @@ const joinRoomByInvite = async (params) => {
       });
 
       room._hasMessageListener = true;
+      console.log(`Message listener set up for room ${roomId}`);
     }
 
     // Create room object for user storage
     const newRoom = {
       id: roomId,
       name: roomInfo.name || 'Joined Room',
-      description: `Joined via invite`,
+      description: roomInfo.description || `Joined via invite`,
       createdAt: roomInfo.createdAt || Date.now(),
       invite: inviteCode,
       key: room.key.toString('hex'),
@@ -2262,6 +2308,8 @@ const joinRoomByInvite = async (params) => {
       await ub.updateUserProfile({
         rooms: JSON.stringify(userRooms)
       });
+
+      console.log(`Added room ${roomId} to user's rooms`);
     }
 
     // Get updated user data
@@ -2271,14 +2319,19 @@ const joinRoomByInvite = async (params) => {
     const userReq = rpc.request('userInfo');
     userReq.send(JSON.stringify(updatedUser));
 
-    // Send room join response
+    console.log('Sent updated user info to client');
+
+    // Send room join result
     const response = {
       success: true,
       room: newRoom
     };
 
+    console.log('Sending room join result to client');
     const req = rpc.request('roomJoinResult');
     req.send(JSON.stringify(response));
+
+    return response;
 
   } catch (error) {
     console.error('Error joining room by invite:', error);
@@ -2289,9 +2342,10 @@ const joinRoomByInvite = async (params) => {
 
     const req = rpc.request('roomJoinResult');
     req.send(JSON.stringify(response));
+
+    return response;
   }
 };
-
 const generateRoomInvite = async (roomId) => {
   try {
     console.log(`Generating invite for room: ${roomId}`);

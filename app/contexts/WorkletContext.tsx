@@ -742,19 +742,51 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
               try {
                 const data = b4a.toString(req.data);
                 const parsedData = JSON.parse(data);
-                console.log('Room join result:', parsedData);
+                console.log('Room join result received:', parsedData);
 
                 if (parsedData.success && parsedData.room) {
                   // If the room was successfully joined, call the appropriate callback
                   if (onRoomJoined) {
+                    console.log('Calling onRoomJoined callback with room data');
                     onRoomJoined(parsedData.room);
                   } else {
-                    console.log('No onRoomJoined callback registered');
+                    console.log('No onRoomJoined callback registered, will send user update');
 
                     // Request updated user data to make sure rooms are updated
-                    const userCheckRequest = client.request('checkUserExists');
-                    userCheckRequest.send("");
+                    try {
+                      const userCheckRequest = client.request('checkUserExists');
+                      userCheckRequest.send("");
+
+                      // Also refresh room list
+                      const roomsRequest = client.request('getRooms');
+                      roomsRequest.send("");
+                    } catch (requestError) {
+                      console.error('Error requesting updated data after room join:', requestError);
+                    }
                   }
+
+                  // Also request rooms list to ensure UI is updated
+                  try {
+                    const roomsRequest = client.request('getRooms');
+                    roomsRequest.send("");
+                  } catch (roomsError) {
+                    console.error('Error requesting rooms list after join:', roomsError);
+                  }
+                } else if (!parsedData.success) {
+                  // Handle join failure - send an error notification
+                  console.error('Room join failed:', parsedData.error || 'Unknown error');
+
+                  // Create a custom notification to show the error
+                  const errorNotification = {
+                    id: `join-error-${Date.now()}`,
+                    content: `Failed to join room: ${parsedData.error || 'Unknown error'}`,
+                    timestamp: Date.now(),
+                    system: true
+                  };
+
+                  // Send this as a system message to the user through the notification channel
+                  const notificationReq = rpcClient.request('systemNotification');
+                  notificationReq.send(JSON.stringify(errorNotification));
                 }
               } catch (e) {
                 console.error('Error handling roomJoinResult:', e);

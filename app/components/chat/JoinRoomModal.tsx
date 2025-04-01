@@ -27,18 +27,23 @@ const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
   onClose,
   onRoomJoined,
 }) => {
-  const { rpcClient } = useWorklet();
+  const { rpcClient, setCallbacks } = useWorklet();
   const [inviteCode, setInviteCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [hasPermission, setHasPermission] = useState<boolean>(false);
   const [scannerVisible, setScannerVisible] = useState(false);
   const [scanned, setScanned] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Reset state when modal opens/closes
   useEffect(() => {
     if (!visible) {
       setScannerVisible(false);
       setScanned(false);
+      setErrorMessage(null);
+    } else {
+      // Set up callbacks when modal opens
+      setupCallbacks();
     }
   }, [visible]);
 
@@ -54,46 +59,118 @@ const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
     }
   }, [scannerVisible]);
 
+  // Set up callbacks for room join results
+  const setupCallbacks = () => {
+    setCallbacks({
+      onRoomJoined: (room) => {
+        console.log('Room joined callback triggered:', room);
+        setIsLoading(false);
+
+        // Clean up and close modal
+        setInviteCode('');
+        onClose();
+
+        // Notify parent component
+        onRoomJoined(room);
+      }
+    });
+  };
+
   const handleJoinRoom = async () => {
     if (!inviteCode.trim()) {
-      Alert.alert('Error', 'Please enter an invite code');
+      setErrorMessage('Please enter an invite code');
       return;
     }
 
+    // Debug the exact code being submitted
+    console.log('Join with code:', inviteCode);
+    console.log('Code length:', inviteCode.length);
+    console.log('Raw code characters:', Array.from(inviteCode).map(c => c.charCodeAt(0)));
+    console.log('Is valid Z32:', /^[a-z2-7]+$/.test(inviteCode));
+
+    // Add a pre-processing step to clean the invite code
+    let cleanedCode = inviteCode.trim();
+
+    // Replace any non-Z32 characters
+    cleanedCode = cleanedCode.replace(/[^a-z2-7]/g, '');
+
+    if (cleanedCode !== inviteCode.trim()) {
+      console.log('Cleaned invite code:', cleanedCode);
+      console.log('Cleaned code is valid Z32:', /^[a-z2-7]+$/.test(cleanedCode));
+
+      // Ask user if they want to use the cleaned code
+      Alert.alert(
+        'Invalid Invite Code Format',
+        'The invite code contains invalid characters. Would you like to try with a cleaned version?',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+            onPress: () => setIsLoading(false)
+          },
+          {
+            text: 'Use Cleaned Code',
+            onPress: () => {
+              setInviteCode(cleanedCode);
+              // Continue with the cleaned code
+              submitJoinRequest(cleanedCode);
+            }
+          }
+        ]
+      );
+      return;
+    }
+
+    submitJoinRequest(inviteCode.trim());
+  };
+
+  // Separate function to submit the join request
+  const submitJoinRequest = async (code) => {
     try {
       setIsLoading(true);
+      setErrorMessage(null);
+
+      console.log('Submitting join request with code:', code);
 
       // Join the room via RPC call to backend
       const request = rpcClient.request('joinRoomByInvite');
-      await request.send(JSON.stringify({ inviteCode: inviteCode.trim() }));
+      await request.send(JSON.stringify({ inviteCode: code }));
 
-      // We'll get a response via the roomJoinResult handler in WorkletContext
-      // Reset form
-      setInviteCode('');
-
-      // Close modal - actual room joining will be handled by the callback
-      onClose();
+      // Set a timeout for the request
+      setTimeout(() => {
+        if (isLoading) {
+          setIsLoading(false);
+          setErrorMessage('Request timed out. Please try again.');
+        }
+      }, 35000);
 
     } catch (error) {
       console.error('Error joining room:', error);
-      Alert.alert('Error', 'Failed to join room. Please try again.');
-    } finally {
       setIsLoading(false);
+      setErrorMessage('Failed to join room. Please try again.');
     }
   };
-
   const handleScanQR = () => {
     setScannerVisible(true);
     setScanned(false);
+    setErrorMessage(null);
   };
 
   const handleBarcodeScanned = ({ type, data }: { type: string, data: string }) => {
     setScanned(true);
     if (data) {
       setInviteCode(data);
-      setTimeout(() => {
-        setScannerVisible(false);
-      }, 500);
+      // Automatically try to join after scanning if invite code looks valid
+      if (data.length >= 16) {
+        setTimeout(() => {
+          setScannerVisible(false);
+          handleJoinRoom();
+        }, 500);
+      } else {
+        setTimeout(() => {
+          setScannerVisible(false);
+        }, 500);
+      }
     }
   };
 
@@ -111,7 +188,7 @@ const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
         <View style={styles.modalContent}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Join a Room</Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+            <TouchableOpacity onPress={onClose} style={styles.closeButton} disabled={isLoading}>
               <MaterialIcons name="close" size={24} color={COLORS.textPrimary} />
             </TouchableOpacity>
           </View>
@@ -158,19 +235,27 @@ const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
               <View style={styles.inputGroup}>
                 <Text style={styles.label}>Invite Code</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, errorMessage ? styles.inputError : null]}
                   value={inviteCode}
-                  onChangeText={setInviteCode}
+                  onChangeText={(text) => {
+                    setInviteCode(text);
+                    if (errorMessage) setErrorMessage(null);
+                  }}
                   placeholder="Enter invite code"
                   placeholderTextColor={COLORS.textMuted}
                   autoCapitalize="none"
                   autoCorrect={false}
+                  editable={!isLoading}
                 />
+                {errorMessage && (
+                  <Text style={styles.errorText}>{errorMessage}</Text>
+                )}
               </View>
 
               <TouchableOpacity
                 style={styles.scanButton}
                 onPress={handleScanQR}
+                disabled={isLoading}
               >
                 <MaterialIcons name="qr-code-scanner" size={20} color={COLORS.primary} />
                 <Text style={styles.scanButtonText}>Scan QR Code</Text>
@@ -197,6 +282,12 @@ const JoinRoomModal: React.FC<JoinRoomModalProps> = ({
                   </>
                 )}
               </TouchableOpacity>
+
+              {isLoading && (
+                <Text style={styles.loadingText}>
+                  Connecting to room... This may take a moment.
+                </Text>
+              )}
             </View>
           )}
         </View>
@@ -250,6 +341,16 @@ const styles = StyleSheet.create({
     padding: 12,
     color: COLORS.textPrimary,
     fontSize: 16,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  inputError: {
+    borderColor: COLORS.error,
+  },
+  errorText: {
+    color: COLORS.error,
+    fontSize: 14,
+    marginTop: 5,
   },
   scanButton: {
     flexDirection: 'row',
@@ -286,6 +387,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
     marginLeft: 8,
+  },
+  loadingText: {
+    textAlign: 'center',
+    color: COLORS.textSecondary,
+    marginTop: 16,
+    fontSize: 14,
   },
   scannerContainer: {
     height: 300,

@@ -359,14 +359,21 @@ class RoomBase extends ReadyResource {
     if (this.opened === false) await this.ready();
     const existing = await this.base.view.findOne('@roombase/invite', {});
     if (existing) {
-      return z32.encode(existing.invite);
+      const inviteCode = z32.encode(existing.invite);
+      console.log('Using existing invite code:', inviteCode);
+      return inviteCode;
     }
 
     const { id, invite, publicKey, expires } = BlindPairing.createInvite(this.base.key);
     const record = { id, invite, publicKey, expires };
     await this.base.append(dispatch('@roombase/add-invite', record));
-    return z32.encode(record.invite);
+
+    const inviteCode = z32.encode(record.invite);
+    console.log('Generated new invite code:', inviteCode);
+    console.log('Invite code is valid Z32:', /^[a-z2-7]+$/.test(inviteCode));
+    return inviteCode;
   }
+
 
   async addWriter(key) {
     await this.base.append(dispatch('@roombase/add-writer', { key: b4a.isBuffer(key) ? key : b4a.from(key) }));
