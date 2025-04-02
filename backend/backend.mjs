@@ -1390,6 +1390,8 @@ const preInitializeAllRooms = async () => {
         // Initialize the room
         const room = await initializeRoom(roomData);
 
+        const roomid = await room.getRoomInfo()
+
         if (room) {
           console.log(`Pre-initialized room: ${roomData.id} (${roomData.name})`);
 
@@ -1400,7 +1402,7 @@ const preInitializeAllRooms = async () => {
               // Format the message
               const formattedMessage = {
                 id: msg.id,
-                roomId: roomData.id,
+                roomId: roomid.id,
                 content: msg.content,
                 sender: msg.sender,
                 timestamp: msg.timestamp,
@@ -1834,8 +1836,37 @@ const resolveFilePath = async (suggestedPath) => {
       normalizedPath = normalizedPath.replace('file://', '');
     }
 
-    // For Android, handle specific path translation
-    if (Bare.argv[0] === 'android') {
+    // For iOS, ensure we have an absolute path, not just a filename
+    if (Bare.argv[0] === 'ios' && !normalizedPath.includes('/')) {
+      // Check if it's just a filename without a path
+      const isJustFilename = !normalizedPath.includes('/') &&
+        (normalizedPath.includes('.') || !normalizedPath.startsWith('/'));
+
+      if (isJustFilename) {
+        // Get the download directory path based on environment
+        const basePath = getDataPath();
+        const downloadsDir = Path.join(basePath, 'downloads');
+
+        // Look for the file in possible download locations
+        const possibleLocations = [
+          Path.join(downloadsDir, normalizedPath),
+          Path.join(basePath, 'downloads', normalizedPath),
+          Path.join(basePath, normalizedPath),
+          // Add more possible locations if needed
+        ];
+
+        console.log('iOS: Checking possible file locations:', possibleLocations);
+
+        // Try each location
+        for (const location of possibleLocations) {
+          if (fs.existsSync(location)) {
+            console.log('Found file at:', location);
+            normalizedPath = location;
+            break;
+          }
+        }
+      }
+    } else if (Bare.argv[0] === 'android') {
       // Check if path starts with content:// or file://
       if (normalizedPath.startsWith('content://')) {
         // Note: This might need to be handled differently in a Bare environment
@@ -1872,7 +1903,6 @@ const resolveFilePath = async (suggestedPath) => {
     throw error;
   }
 };
-
 const handleFileDownload = async (requestData) => {
   try {
     const params = JSON.parse(requestData);
@@ -1897,8 +1927,9 @@ const handleFileDownload = async (requestData) => {
     }
 
     // Generate download directory based on platform
+    const basePath = getDataPath();
     const downloadDir = Path.join(
-      path,
+      basePath,
       'downloads',
       roomId
     );
@@ -1961,6 +1992,8 @@ const handleFileDownload = async (requestData) => {
       attachmentId: attachment.blobId,
       fileName: attachment.name,
       filePath: outputPath,
+      fileBaseName: Path.basename(outputPath), // Just the filename part
+      downloadDir: downloadDir, // Directory where file is stored
       mimeType: attachment.type || getMimeType(attachment.name),
       fileSize: attachment.size || 0,
       preview,
