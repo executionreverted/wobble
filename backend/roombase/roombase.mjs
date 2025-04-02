@@ -15,8 +15,8 @@ import path from 'bare-path';
 import { generateUUID, sanitizeTextForTerminal } from '../utils.mjs';
 import Hypercore from 'hypercore';
 import Path from "bare-path"
-let roomCorestores = {}
-let roomBases = {}
+
+
 class RoomBasePairer extends ReadyResource {
   constructor(store, invite, opts = {}) {
     super();
