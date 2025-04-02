@@ -540,7 +540,9 @@ const createRoom = async (roomData) => {
     await roomCorestore.ready();
 
     // Set up blob core and store for attachments
-    const blobCore = new Hypercore(roomDir + '/blobs');
+    const blobDir = `${roomBasePath}/${roomId}-blobs`;
+    const blobCore = new Hypercore(blobDir);
+
     await blobCore.ready();
 
     const blobStore = new Hyperblobs(blobCore);
@@ -783,8 +785,8 @@ const initializeRoom = async (roomData) => {
     const roomCorestore = new Corestore(roomDir);
     await roomCorestore.ready();
 
-    // Set up blob core and store for attachments
-    const blobCore = new Hypercore(roomDir + '/blobs');
+    const blobDir = `${roomBasePath}/${roomId}-blobs`;
+    const blobCore = new Hypercore(blobDir);
     await blobCore.ready();
 
     const blobStore = new Hyperblobs(blobCore);
@@ -1944,17 +1946,12 @@ const handleFileDownload = async (requestData) => {
     } : undefined;
 
     // Attempt download with timeout
-    const downloadResult = await Promise.race([
-      room.downloadFileToPath(attachment, outputPath, {
-        onProgress,
-        preview,
-        platformOS: Bare.argv[0],
-        resolvedInputPath  // Pass resolved input path if available
-      }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Download timeout')), 45000)
-      )
-    ]);
+    const downloadResult = await room.downloadFileToPath(attachment, outputPath, {
+      onProgress,
+      preview,
+      platformOS: Bare.argv[0],
+      resolvedInputPath  // Pass resolved input path if available
+    })
 
     console.log('Download complete, result:', downloadResult);
 
@@ -2033,7 +2030,7 @@ const getMimeType = (filename) => {
 
 
 const joinRoomByInvite = async (params) => {
-  const { inviteCode } = params;
+  let { inviteCode } = params;
 
   if (!inviteCode || typeof inviteCode !== 'string') {
     const response = {
@@ -2044,6 +2041,7 @@ const joinRoomByInvite = async (params) => {
     req.send(JSON.stringify(response));
     return;
   }
+  inviteCode = inviteCode.trim()
 
   try {
     // First ensure UserBase is initialized
@@ -2068,8 +2066,9 @@ const joinRoomByInvite = async (params) => {
     const roomCorestore = new Corestore(roomDir);
     await roomCorestore.ready();
 
+    const blobDir = `${roomBasePath}/${roomId}-blobs`;
     // Set up blob core and store for attachments
-    const blobCore = new Hypercore(roomDir + '/blobs');
+    const blobCore = new Hypercore(blobDir);
     await blobCore.ready();
 
     const blobStore = new Hyperblobs(blobCore);
@@ -2095,7 +2094,7 @@ const joinRoomByInvite = async (params) => {
     }
 
 
-
+    console.log('Init pairer')
     // Join the room using the invite code
     const room = await RoomBase.pair(roomCorestore, inviteCode, {
       blobCore,

@@ -6,7 +6,7 @@ import useWorklet from './useWorklet';
  * Hook for efficiently working with cached files
  */
 export const useCachedFile = (roomId: string, attachment: any) => {
-  const { activeDownloadsRef, fileDownloads, downloadFile } = useWorklet();
+  const { activeDownloadsRef, fileDownloads, downloadFile, setFileDownloads } = useWorklet();
   const [isDownloading, setIsDownloading] = useState(false);
   const [isCached, setIsCached] = useState(false);
   const [isCheckingCache, setIsCheckingCache] = useState(false);
@@ -66,7 +66,20 @@ export const useCachedFile = (roomId: string, attachment: any) => {
               if (metadata.isPreview) {
                 setHasPreview(true);
               }
-              downloadFile(roomId, attachment, metadata.isPreview, attachmentKey);
+
+              // Important: Update the file download state to reflect cached state
+              setFileDownloads(prev => ({
+                ...prev,
+                [attachmentKey]: {
+                  progress: 100,
+                  message: 'Available from cache',
+                  preview: metadata.isPreview,
+                  fileName: metadata.fileName,
+                  mimeType: metadata.mimeType,
+                  path: metadata.filePath,
+                  fromCache: true
+                }
+              }));
             }
           } catch (metadataError) {
             console.error('Error getting file metadata:', metadataError);
@@ -82,13 +95,10 @@ export const useCachedFile = (roomId: string, attachment: any) => {
       }
     };
 
-
     if (!isCheckingCache) {
       checkCache();
     }
-
   }, [attachmentKey, roomId, attachment, isCached, downloadStatus]);
-
   // Function to handle downloads with cache awareness
   const handleDownload = useCallback(async (preview = false) => {
     if (!attachmentKey || isDownloading) return false;

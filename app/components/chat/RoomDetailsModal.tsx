@@ -228,7 +228,7 @@ const RoomDetailsModal = ({
           <FlatList
             data={files}
             renderItem={renderFileItem}
-            keyExtractor={(item) => item.blobId}
+            keyExtractor={(item, idx) => (`${item.coreKey}-${item.size}-${item.name}`)}
             ListEmptyComponent={EmptyState}
             ListFooterComponent={() =>
               hasMore && isLoading ? (

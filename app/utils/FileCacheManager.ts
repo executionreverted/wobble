@@ -30,6 +30,15 @@ interface FileCacheEntry {
   isPreview: boolean;
 }
 
+export const normalizePath = (path: string): string => {
+  if (Platform.OS === 'android') {
+    // Ensure Android paths have file:// prefix
+    return path.startsWith('file://') ? path : `file://${path}`;
+  }
+  // For iOS, strip file:// prefix if it exists
+  return path.startsWith('file://') ? path.substring(7) : path;
+};
+
 // Main cache manager class
 export class FileCacheManager {
   private static instance: FileCacheManager;
@@ -112,7 +121,7 @@ export class FileCacheManager {
         if (!entry || !entry.filePath) continue;
 
         // Check if file exists
-        const fileInfo = await FileSystem.getInfoAsync(entry.filePath);
+        const fileInfo = await FileSystem.getInfoAsync(normalizePath(entry.filePath));
 
         if (fileInfo.exists && fileInfo.size > 0) {
           validMetadata[key] = {
@@ -157,11 +166,11 @@ export class FileCacheManager {
       if (newSize <= CACHE_MAX_SIZE * 0.7) break;
 
       try {
-        await FileSystem.deleteAsync(entry.filePath, { idempotent: true });
+        await FileSystem.deleteAsync(normalizePath(entry.filePath), { idempotent: true });
         delete newMetadata[entry.key];
         newSize -= entry.size;
       } catch (error) {
-        console.error(`Error removing file ${entry.fileName}:`, error);
+        console.log(`Error removing file ${entry.fileName}:`, error);
       }
     }
 
@@ -203,7 +212,7 @@ export class FileCacheManager {
     // Create a unique filename
     const timestamp = Date.now();
     const safeFileName = fileName.replace(/[^a-zA-Z0-9\._]/g, '_');
-    const filePath = `${directory}${timestamp}_${safeFileName}`;
+    const filePath = normalizePath(`${directory}${timestamp}_${safeFileName}`);
 
     try {
       // Write file to storage
@@ -764,7 +773,7 @@ export class FileCacheManager {
 
 
   async registerDownloadedFile(fileData) {
-    const {
+    let {
       attachmentKey,
       filePath,
       publicFilePath,
@@ -796,11 +805,13 @@ export class FileCacheManager {
 
       // Add all possible paths to check
       if (filePath) {
+        filePath = normalizePath(filePath)
         pathsToCheck.push(filePath);
         if (!filePath.startsWith('file://')) pathsToCheck.push(`file://${filePath}`);
       }
 
       if (publicFilePath) {
+        publicFilePath = normalizePath(publicFilePath)
         pathsToCheck.push(publicFilePath);
         if (!publicFilePath.startsWith('file://')) pathsToCheck.push(`file://${publicFilePath}`);
       }
@@ -824,7 +835,7 @@ export class FileCacheManager {
 
           if (fileInfo.exists && fileInfo.size > 0) {
             console.log(`Valid file found at: ${pathToCheck}, size: ${fileInfo.size}`);
-            validPath = pathToCheck;
+            validPath = normalizePath(pathToCheck);
             validSize = fileInfo.size || validSize;
             break;
           } else {

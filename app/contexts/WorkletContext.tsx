@@ -11,7 +11,7 @@ import { FileAttachment, Room, Message } from '../types';
 import resetRegistry from './resetSystem';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createStableBlobId, getUTIForMimeType } from '../utils/helpers';
-import fileCacheManager, { FileCacheManager } from '../utils/FileCacheManager';
+import fileCacheManager, { FileCacheManager, normalizePath } from '../utils/FileCacheManager';
 
 const DOWNLOAD_TIMEOUT_MS = 45000; // 45 seconds timeout
 // Use variables instead of state for callbacks
@@ -103,6 +103,7 @@ export interface WorkletContextType {
     files: FileAttachment[],
     hasMore: boolean
   }>;
+  setFileDownloads: any
 }
 
 export const WorkletContext = createContext<WorkletContextType>(undefined as any);
@@ -1027,7 +1028,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       error,
       attachmentId,
       filePath,
-      publicFilePath, // Add support for the public path
+      publicFilePath,
       mimeType,
       fileName,
       preview,
@@ -1042,6 +1043,7 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       console.error('Missing attachment identifier');
       return;
     }
+
     if (activeDownloadsRef.current.has(downloadKey)) {
       activeDownloadsRef.current.delete(downloadKey);
       console.log(`Removed ${downloadKey} from active downloads, remaining: ${activeDownloadsRef.current.size}`);
@@ -1049,17 +1051,35 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
 
     if (success && (filePath || publicFilePath)) {
       try {
+        // Ensure we use a properly formatted path
+        const normalizedPath = normalizePath(Platform.OS === 'android' && publicFilePath ?
+          publicFilePath : filePath);
+
         // Update file download state with the path information
         updateFileDownload(downloadKey, {
           progress: 100,
           message: 'Download complete',
-          path: Platform.OS === 'android' && publicFilePath ? publicFilePath : filePath,
+          path: normalizedPath,
           mimeType,
           fileName,
           preview,
           timestamp: Date.now(),
           fileSize
         });
+
+        // Force UI update by slightly modifying the state - this helps React Native rerender
+        setTimeout(() => {
+          updateFileDownload(downloadKey, {
+            progress: 100,
+            message: 'Ready to view',
+            path: normalizedPath,
+            mimeType,
+            fileName,
+            preview,
+            timestamp: Date.now() + 1, // Small change to force state update
+            fileSize
+          });
+        }, 300);
 
         // Register file with cache manager with enhanced Android support
         await fileCacheManager.registerDownloadedFile({
@@ -1088,8 +1108,6 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       });
     }
   }, [updateFileDownload]);
-
-
 
 
   const onFileDownloadProgress = useCallback((data: FileProgressData) => {
@@ -1408,7 +1426,8 @@ export const WorkletProvider: React.FC<WorkletProviderProps> = ({ children }) =>
       isCacheInitialized,
       cacheInitPromise: cacheInitPromise.current,
       saveFileToDevice,
-      getRoomFiles
+      getRoomFiles,
+      setFileDownloads
     }
   ), [
     worklet,

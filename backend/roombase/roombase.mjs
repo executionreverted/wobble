@@ -362,6 +362,8 @@ class RoomBase extends ReadyResource {
       return z32.encode(existing.invite);
     }
 
+    console.log('Create invite')
+
     const { id, invite, publicKey, expires } = BlindPairing.createInvite(this.base.key);
     const record = { id, invite, publicKey, expires };
     await this.base.append(dispatch('@roombase/add-invite', record));
@@ -369,11 +371,14 @@ class RoomBase extends ReadyResource {
   }
 
   async addWriter(key) {
+    console.log('addWriter')
     await this.base.append(dispatch('@roombase/add-writer', { key: b4a.isBuffer(key) ? key : b4a.from(key) }));
     return true;
   }
 
   async removeWriter(key) {
+
+    console.log('removeWriter')
     await this.base.append(dispatch('@roombase/remove-writer', { key: b4a.isBuffer(key) ? key : b4a.from(key) }));
   }
 
